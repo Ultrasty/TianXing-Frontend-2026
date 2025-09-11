@@ -3,7 +3,6 @@
 import { ref, onMounted, computed } from "vue";
 import VChart from 'vue-echarts'
 import axios from 'axios';
-import request from '@/utils/request';//项目已提供 src/utils/request.ts 工具，它会自动应用环境变量中的API前缀。byCP
 import bannerImg from '@/assets/Ice.jpg';
 
 const selectedTime = ref(new Date('2023-01'));
@@ -472,12 +471,9 @@ function selectChart(index) {
 
 onMounted(() => {
   Promise.all([
-    //axios.get('/seaice/initial/SICError'),
-    request.get('/seaice/initial/SICError'),
-    //axios.get('/seaice/initial/SICErrorBox'),
-    request.get('/seaice/initial/SICErrorBox'),
-    //axios.get('/seaice/initial/SIEErrorAnalysis')
-    request.get('/seaice/initial/SIEErrorAnalysis')
+    axios.get('/seaice/initial/SICError'),
+    axios.get('/seaice/initial/SICErrorBox'),
+    axios.get('/seaice/initial/SIEErrorAnalysis')
   ]).then(([res1, res2, res3]) => {
     // console.log(res1, res2, res3);
     start_year1.value = res1.data.yearList;
