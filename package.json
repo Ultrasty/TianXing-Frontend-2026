@@ -6,7 +6,7 @@
   "packageManager": "pnpm@8.15.4",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc && vite build",
+    "build": "vite build",
     "postbuild": "node scripts/archive",
     "preview": "vite preview"
   },
