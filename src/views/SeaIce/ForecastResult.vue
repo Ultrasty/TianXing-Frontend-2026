@@ -68,16 +68,9 @@ function selectChart(index) {
   selectedSIE.value = index === 0;
   selectedSIC.value = index === 1;
   if (selectedSIE.value) {
-    // 选取可用时间 - 添加空数组检查
-    if (SIEAvailableList.value.length > 0) {
-      // 从sieInitial中获取最新的条目（假设按时间排序）
-      const latestEntry = SIEAvailableList.value[SIEAvailableList.value.length - 1];
-      selectedTime.value = new Date(latestEntry.year, latestEntry.month - 1);
-      updateSIEChart();
-    } else {
-      console.warn('SIEAvailableList为空，无法选择时间');
-      // 可以在这里添加提示用户的逻辑
-    }
+    // 从SIC切换到SIE时，设置默认时间为2025年7月
+    selectedTime.value = new Date(2025, 6); // 2025年7月（月份从0开始，所以6代表7月）
+    updateSIEChart();
   } else {
     // 选取可用时间
     let newestYear = Math.max(...SICAvailableList.value.yearList);

@@ -13,8 +13,9 @@ const newUrl = "http://aimfdp.nmc.cn/";
     <div class="redirect-box">
       <!-- 新增的图片 -->
       <img :src="redirectImg" alt="迁移提示图" class="redirect-img" />
-      <h1>本功能已迁移</h1>
-      <p>该页面已迁移至新网站，请访问：</p>
+      <h1>本页面已迁移</h1>
+      <p>天行气象大模型已参加中国气象局人工智能天气预报模型示范计划</p>
+      <p>详情请访问：</p>
       <a :href="newUrl" target="_blank" rel="noopener">{{ newUrl }}</a>
     </div>
   </div>

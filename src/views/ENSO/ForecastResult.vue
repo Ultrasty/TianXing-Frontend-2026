@@ -65,7 +65,7 @@ function handleClick(chartName, index) {
 
 
 // ====================== 时间 & 图表初始值 ======================
-const currentDate = ref(new Date());   // 初始日期
+const currentDate = ref(new Date(2025, 0));   // 初始日期
 const start_year = computed(() => currentDate.value.getFullYear());
 const start_month = computed(() => currentDate.value.getMonth() + 1);
 
