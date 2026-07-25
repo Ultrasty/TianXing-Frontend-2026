@@ -16,7 +16,7 @@ import { ADMIN_TOKEN_KEY } from '@/api/admin'
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const router = createRouter({
-    history: createWebHashHistory('/tianxing'),
+    history: createWebHashHistory(),
     routes: [
         {
             name: 'AdminLogin',

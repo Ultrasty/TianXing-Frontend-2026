@@ -94,6 +94,11 @@ const menus = ref([
       { title: '预测检验', name: 'SeaIce_ForecastExamination' },
     ],
   },
+  {
+    title: '后台管理',
+    name: 'AdminLogin',
+    to: { name: 'AdminLogin' }
+  },
 ]);
 
 const nav_item_selected = ref<string | null>(null);
