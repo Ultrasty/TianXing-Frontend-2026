@@ -23,7 +23,7 @@
 * 这些按钮的位置取决于它们的直接父元素，务必为它们的父元素设置position属性！
 * 它们会分属左右两边，紧贴边界，充满高度
 */
-.el-button{
+.chart-selector .el-button{
   position: absolute;
   top: 0;
   width: 7%;

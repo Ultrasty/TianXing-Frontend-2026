@@ -1,21 +1,35 @@
 import ENSOForecastExamination from '@/views/ENSO/ForecastExamination.vue'
-
 import ENSOForecastResult from '@/views/ENSO/ForecastResult.vue'
 import GlobalWeatherForecastResult from '@/views/GlobalWeather/ForecastResult.vue'
 
 // Import SeaIce components
-import SeaIce_ForecastResult from '@/views/SeaIce/ForecastResult.vue';
-import SeaIce_ForecastExamination from '@/views/SeaIce/ForecastExamination.vue';
+import SeaIce_ForecastResult from '@/views/SeaIce/ForecastResult.vue'
+import SeaIce_ForecastExamination from '@/views/SeaIce/ForecastExamination.vue'
 
-import NAOForecastResult from '@/views/NAO/ForecastResult.vue';
-import NAOForecastExamination from '@/views/NAO/ForecastExamination.vue';
+import NAOForecastResult from '@/views/NAO/ForecastResult.vue'
+import NAOForecastExamination from '@/views/NAO/ForecastExamination.vue'
 
 import UserView from '@/views/user/UserView.vue'
+import AdminLogin from '@/views/admin/AdminLogin.vue'
+import AdminForecastData from '@/views/admin/ForecastDataAdmin.vue'
+import { ADMIN_TOKEN_KEY } from '@/api/admin'
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const router = createRouter({
     history: createWebHashHistory('/tianxing'),
     routes: [
+        {
+            name: 'AdminLogin',
+            path: '/admin/login',
+            component: AdminLogin,
+            meta: { title: 'Admin Login' },
+        },
+        {
+            name: 'AdminForecastData',
+            path: '/admin/forecast-data',
+            component: AdminForecastData,
+            meta: { title: 'Forecast Data Admin', requiresAdmin: true },
+        },
         {
             name: 'home',
             path: '/',
@@ -31,7 +45,6 @@ const router = createRouter({
                     component: ENSOForecastExamination,
                 },
                 {
-
                     name: 'ENSO_ForecastResult',
                     meta: {
                         title: 'ENSO_ForecastResult',
@@ -78,11 +91,20 @@ const router = createRouter({
                     },
                     path: 'NAO_ForecastExamination',
                     component: NAOForecastExamination,
-                }
-
+                },
             ],
         },
     ],
 })
 
-export default router;
+router.beforeEach((to) => {
+    if (to.meta.requiresAdmin && !localStorage.getItem(ADMIN_TOKEN_KEY)) {
+        return { name: 'AdminLogin' }
+    }
+    if (to.name === 'AdminLogin' && localStorage.getItem(ADMIN_TOKEN_KEY)) {
+        return { name: 'AdminForecastData' }
+    }
+    return true
+})
+
+export default router
