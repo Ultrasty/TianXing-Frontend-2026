@@ -1,478 +1,476 @@
 <script setup>
-import { ref, onMounted, reactive, watch, defineExpose, computed } from "vue";
-import * as echarts from "echarts";
-import axios from "axios";
-import VChart from 'vue-echarts';
-import { nextTick } from "vue";
-import { configProviderContextKey } from "element-plus";
-import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
-import bannerImg from '@/assets/nao.jpg';//首页图
+import { computed, onMounted, ref } from 'vue'
+import axios from 'axios'
+import VChart from 'vue-echarts'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import bannerImg from '@/assets/nao.jpg'
+import { preloadImages, resolveImageUrl } from '@/utils/image'
+import { requestErrorMessage } from '@/utils/requestError'
 
-const prefix = "https://tianxing.tongji.edu.cn"
-// 新加入
-const chartSelected = ref(0);
-const chartNames = ['指数预测', '模态预测'];
+const chartNames = ['模态预测', '指数预测']
+const chartSelected = ref(0)
+const descriptions = [
+  '预测误差主要来自于对中纬度和冰岛附近低压的高估。模型能够预测出 NAO 的典型两极模态，模拟误差会随预测时长增加。',
+  'NAOI 的中长期预测技巧优于失去预测能力后的数值模式，将 NAO 的有效预测时间扩展到了约六个月。',
+]
 
-//时间选择器范围框定--start
-const start_year = ref(null);
-const start_month = ref(null);
-const end_year = ref(null);
-const end_month = ref(null);
+const selectedDate = ref(null)
+const dateRange = ref({ start: null, end: null })
+const modalImages = ref([])
+const modalImageIndex = ref(0)
+const correlationOption = ref({})
+const loading = ref([false, false])
+const errors = ref(['', ''])
+const requestIds = [0, 0]
 
-const selectedDateTime = ref(new Date('2015-1'));
-const selectedYear = computed(() => {
-  return selectedDateTime.value.getFullYear();
+const currentModalImage = computed(() => (
+  resolveImageUrl(modalImages.value[modalImageIndex.value])
+))
+const hasCorrelationData = computed(() => (
+  Object.keys(correlationOption.value || {}).length > 0
+))
+const modalTitle = computed(() => {
+  if (!selectedDate.value) return 'NAO 预测结果分布误差图'
+  return `${selectedDate.value.getFullYear()}年${selectedDate.value.getMonth() + 1}月 预测结果分布误差图`
 })
-const selectedMonth = computed(() => {
-  return selectedDateTime.value.getMonth() + 1;
-})
 
-axios.get('/nao/initialize/naoCORR')
-  .then(res => {
-    start_year.value = res.data.start_year;
-    start_month.value = new Date(res.data.start_month);
-    end_year.value = res.data.end_year;
-    end_month.value = new Date(res.data.end_month);
-    //console.log(res.data);
-  })
-  .catch(error => {
-    console.error(error);
-  });
-
-const limitedDateRange = (time) => {
-  return time.getFullYear() < start_year.value || time.getFullYear() > end_year.value;
-};
-
-
-const text_of_option1 = ref('预测误差主要来自于对中纬度和冰岛附近低压的高估，能够预测出NAO的典型两级模态 ，模拟误差随着预测时长逐渐增加。')//表示前六个图底下的文字描述
-const text_of_option7 = ref('对于为期1个月的NAOI预测，不如高分辨率模式ECMWF ，但与低分辨率模式ECCC相当。由于只接受月平均数作为输入，忽略了决定短时尺度可预测性的天气现象和初始条件。在超过两个月的提前期的预测技巧远远超过了失去预测能力的数值模式，将NAO的有效预测时间从1个月扩展到了6个月。')
-
-
-var index_nao = 0; //切换气温预测时修改这个索引
-var imgSrc_of_nao_Array;
-var title_of_nao_Array;
-const imgSrc_of_nao = ref({})
-const title_of_nao = ref({})
-
-const option7 = ref({})
-
-function updateChartTitle() {
-  //使元素失焦
-  document.activeElement.blur();
-
-  axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
-    .then(res => {
-      index_nao = 0;
-      console.log("点击标签,更新nao", res.data);
-      imgSrc_of_nao_Array = res.data;
-      imgSrc_of_nao.value = `${prefix}${imgSrc_of_nao_Array[0]}`;
-      //console.log("wwwww",imgSrc_of_nao_Array[0]);
-    })
-    .catch(error => {
-      console.error(error);
-    });
-
-  axios.get('/nao/predictionExamination/naoi')
-    .then(res => {
-      console.log("更新naoi", res.data);
-      // title_of_option1.value='提前1个月预测';
-      // list = res.data.imgSrc;
-      option7.value = res.data;
-    })
-    .catch(error => {
-      console.error(error);
-    });
+function createMonth(yearValue, monthValue) {
+  const year = Number(yearValue)
+  const month = Number(monthValue)
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null
+  }
+  return new Date(year, month - 1, 1)
 }
 
-//////////以下两个是初始化
-axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
-  .then(res => {
-    index_nao = 0;
-    console.log("初始化nao", res.data);
-    imgSrc_of_nao_Array = res.data;
-    imgSrc_of_nao.value = `${prefix}${imgSrc_of_nao_Array[0]}`;
-    //console.log("swwwww",imgSrc_of_nao_Array[0]);
-  });
-
-axios.get('/nao/predictionExamination/naoi')
-  .then(res => {
-    console.log("初始化naoi", res.data);
-    // title_of_option1.value='提前1个月预测';
-    // list = res.data.imgSrc;
-    option7.value = res.data;
-  });
-
-function change_time_nao(flag) {
-
-  if (flag === "left") {
-    if (index_nao > 0) {
-      index_nao--;
-    }
-    else {
-      index_nao = 5;
-    }
-  }
-  else if (flag === "right") {
-    if (index_nao < 5) {
-      index_nao++;
-    }
-    else {
-      index_nao = 0;
-    }
-  }
-  title_of_nao.value = title_of_nao_Array[index_nao];
-  imgSrc_of_nao.value = `${prefix}${imgSrc_of_nao_Array[index_nao]}`;
-  //text_of_temperature.value=text_of_temperature_Array[index_tempe];
+function monthNumber(date) {
+  return date.getFullYear() * 12 + date.getMonth()
 }
 
-//换成新的选项卡
+function limitedDateRange(time) {
+  if (!dateRange.value.start || !dateRange.value.end) return false
+  const value = monthNumber(time)
+  return value < monthNumber(dateRange.value.start)
+    || value > monthNumber(dateRange.value.end)
+}
+
+function normalizeImages(value) {
+  const list = Array.isArray(value) ? value : [value]
+  return list.filter((item) => typeof item === 'string' && item.trim())
+}
+
+async function initializeModal() {
+  const requestId = ++requestIds[0]
+  loading.value[0] = true
+  errors.value[0] = ''
+  modalImages.value = []
+  modalImageIndex.value = 0
+
+  try {
+    const response = await axios.get('/nao/initialize/naoCORR')
+    if (requestId !== requestIds[0]) return
+
+    const start = createMonth(response.data?.start_year, response.data?.start_month)
+    const end = createMonth(response.data?.end_year, response.data?.end_month)
+    if (!start || !end || monthNumber(start) > monthNumber(end)) {
+      throw new Error('Invalid NAO examination date range')
+    }
+    const images = normalizeImages(response.data?.data)
+    if (images.length === 0) throw new Error('Empty NAO examination image list')
+
+    dateRange.value = { start, end }
+    selectedDate.value = new Date(end)
+    modalImages.value = images
+    preloadImages(images)
+  } catch (error) {
+    if (requestId !== requestIds[0]) return
+    dateRange.value = { start: null, end: null }
+    errors.value[0] = requestErrorMessage(error, 'NAO 模态检验初始化失败')
+  } finally {
+    if (requestId === requestIds[0]) loading.value[0] = false
+  }
+}
+
+async function loadModal() {
+  if (!selectedDate.value) return
+
+  const requestId = ++requestIds[0]
+  loading.value[0] = true
+  errors.value[0] = ''
+  modalImages.value = []
+  modalImageIndex.value = 0
+
+  try {
+    const response = await axios.get('/nao/predictionExamination/nao', {
+      params: {
+        year: selectedDate.value.getFullYear(),
+        month: selectedDate.value.getMonth() + 1,
+      },
+    })
+    if (requestId !== requestIds[0]) return
+    const images = normalizeImages(response.data)
+    if (images.length === 0) throw new Error('Empty NAO examination image list')
+    modalImages.value = images
+    preloadImages(images)
+  } catch (error) {
+    if (requestId !== requestIds[0]) return
+    errors.value[0] = requestErrorMessage(error, 'NAO 模态检验图片加载失败')
+  } finally {
+    if (requestId === requestIds[0]) loading.value[0] = false
+  }
+}
+
+async function loadCorrelation() {
+  const requestId = ++requestIds[1]
+  loading.value[1] = true
+  errors.value[1] = ''
+  correlationOption.value = {}
+
+  try {
+    const response = await axios.get('/nao/predictionExamination/naoi')
+    if (requestId !== requestIds[1]) return
+    if (
+      !response.data
+      || typeof response.data !== 'object'
+      || Object.keys(response.data).length === 0
+    ) {
+      throw new Error('Invalid NAO correlation chart')
+    }
+    correlationOption.value = response.data
+  } catch (error) {
+    if (requestId !== requestIds[1]) return
+    errors.value[1] = requestErrorMessage(error, 'NAOI 相关系数加载失败')
+  } finally {
+    if (requestId === requestIds[1]) loading.value[1] = false
+  }
+}
+
 function selectChart(index) {
-  chartSelected.value = index;
+  chartSelected.value = index
+  if (index === 0 && modalImages.value.length === 0 && !loading.value[0]) {
+    dateRange.value.start ? loadModal() : initializeModal()
+  } else if (index === 1 && !hasCorrelationData.value && !loading.value[1]) {
+    loadCorrelation()
+  }
 }
 
-const moveBoxLeft = computed(() => {
-  return chartSelected.value * 250;
-});
+function handleDateChange() {
+  document.activeElement?.blur()
+  loadModal()
+}
+
+function retryActive() {
+  if (chartSelected.value === 1) return loadCorrelation()
+  return dateRange.value.start ? loadModal() : initializeModal()
+}
+
+function changeImageIndex(direction) {
+  const total = modalImages.value.length
+  if (total < 2) return
+  modalImageIndex.value = direction === 'left'
+    ? (modalImageIndex.value - 1 + total) % total
+    : (modalImageIndex.value + 1) % total
+}
 
 const movBoxStyle = computed(() => ({
-  position: "absolute",
-  bottom: "0px",
-  left: `${moveBoxLeft.value}px`,
-  height: "2px",
-  width: "125px",
-  transform: "translateX(50%)",
-  //backgroundColor: "blue",
-  backgroundColor: "rgb(143,178,201)",
-  //backgroundColor: "rgb(92,179,204)",
-  transition: "left 0.3s ease"
-}));
+  left: `${chartSelected.value * 250}px`,
+}))
+
+onMounted(() => {
+  initializeModal()
+  loadCorrelation()
+})
 </script>
 
 <template>
-  <div class="pageContent">
+  <div class="page-content">
     <div class="banner">
-      <img :src="bannerImg" />
-      <h3 class="title">NAO预测结果检验</h3>
+      <img :src="bannerImg" alt="">
+      <h3 class="page-title">NAO预测结果检验</h3>
     </div>
 
     <div class="menu-container">
       <ul class="menu">
         <div :style="movBoxStyle" class="mov-box"></div>
-        <li v-for="(chartName, index) of chartNames" :key="chartName" @click="selectChart(index)"
-          :class="{ 'chart-name-selected': chartSelected === index }">
+        <li
+          v-for="(chartName, index) in chartNames"
+          :key="chartName"
+          :class="{ 'chart-name-selected': chartSelected === index }"
+          @click="selectChart(index)"
+        >
           <p>{{ chartName }}</p>
         </li>
       </ul>
     </div>
 
-
-
-    <div style="margin: 0px 10%;">
-
-      <div class="datePickerContainer">
-        <el-date-picker @change="updateChartTitle()" v-model="selectedDateTime" type="month" :clearable="false"
-          :disabledDate="limitedDateRange" />
+    <section class="content-shell">
+      <div v-if="chartSelected === 0" class="date-picker-container">
+        <el-date-picker
+          v-model="selectedDate"
+          type="month"
+          :clearable="false"
+          :disabled="loading[0] && !dateRange.start"
+          :disabled-date="limitedDateRange"
+          @change="handleDateChange"
+        />
+      </div>
+      <div v-else class="date-independent-note">
+        该指标为固定的提前期相关系数，不随起报日期变化。
       </div>
 
-      <div class="text-container" v-if="chartSelected === 0">
-        <div class="description">
-          {{ text_of_option1 }}
-        </div>
+      <div class="description">{{ descriptions[chartSelected] }}</div>
+    </section>
+
+    <section
+      class="chart-selector"
+      :class="{ 'has-state': Boolean(errors[chartSelected]) }"
+      v-loading="loading[chartSelected]"
+    >
+      <div v-if="errors[chartSelected]" class="state-panel">
+        <el-alert :title="errors[chartSelected]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="retryActive">重新加载</el-button>
       </div>
 
-      <div class="text-container" v-if="chartSelected === 1">
-        <div class="description1">
-          {{ text_of_option7 }}
-        </div>
+      <div v-else-if="chartSelected === 0 && modalImages.length" class="picture-container">
+        <h2>{{ modalTitle }}</h2>
+        <p>{{ modalImageIndex + 1 }}/{{ modalImages.length }}</p>
+        <img :src="currentModalImage" alt="NAO 预测结果分布误差图">
+        <template v-if="modalImages.length > 1">
+          <el-button
+            type="primary"
+            class="arrow-left"
+            :icon="ArrowLeft"
+            aria-label="上一张"
+            @click="changeImageIndex('left')"
+          />
+          <el-button
+            type="primary"
+            class="arrow-right"
+            :icon="ArrowRight"
+            aria-label="下一张"
+            @click="changeImageIndex('right')"
+          />
+        </template>
       </div>
-    </div>
+      <el-empty
+        v-else-if="chartSelected === 0 && !loading[0]"
+        description="暂无 NAO 模态检验图片"
+      />
 
-    <div>
-      <p></p>
-    </div>
-
-    <div class="chart-selector" v-if="chartSelected === 1">
-      <h2 class="chart-title">
-        NAOI指数预测的相关系数
-      </h2>
-      <div class="chart">
-        <v-chart :option="option7" autoresize></v-chart>
-      </div>
-    </div>
-
-    <div class="chart-selector" v-else-if="chartSelected === 0">
-      <!-- <div class="whole_container"> -->
-      <div class="pic_container">
-        <h2 class="chart-title">
-          {{ selectedYear }}年{{ selectedMonth }}月 预测结果分布误差图
-        </h2>
-        <img class="picture" :src="imgSrc_of_nao" alt="">
-      </div>
-      <!-- <el-button ref="buttonLeft" type="primary" class="arrowLeft" :icon="ArrowLeft"
-            @click=" change_time_nao('left')"></el-button>
-          <el-button ref="buttonRight" type="primary" class="arrowRight" :icon="ArrowRight"
-            @click=" change_time_nao('right')"></el-button> -->
-      <!-- </div> -->
-    </div>
-
-
+      <template v-else-if="chartSelected === 1">
+        <h2 class="chart-title">NAOI指数预测的相关系数</h2>
+        <v-chart v-if="hasCorrelationData" class="chart" :option="correlationOption" autoresize />
+        <el-empty v-else-if="!loading[1]" description="暂无 NAOI 相关系数数据" />
+      </template>
+    </section>
   </div>
 </template>
 
 <style scoped lang="scss">
-.chart-title {
-  text-align: center;
-  margin-top: 0px;
-  font-size: 18px;
+.page-content {
+  min-height: 100%;
 }
 
-.title {
-  //font-family: 'FangSong', sans-serif;
-  //font-family: 'STKaiti';
-  //font-family: 'SimSun';
-  font-family: 'STXinwei';
-  font-weight: 300; //调整字体粗细
-  text-align: center;
-  font-size: 55px;
-  margin-left: 20%;
-  letter-spacing: 1px; /* 字符间距 */
-  z-index: 1; /* 确保图片在文字下方 */
-  color:rgb(19, 24, 36);
-
-}
-
-.chart {
-  height: 500px;
-  background-color: white;
-}
-
-.datePickerContainer {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20px;
-  padding-right: 15%;
-  padding-top: 50px;
-}
-
-.text {
-  margin-left: 5px;
-  margin-right: 10px;
-}
-
-.picture_title {
-  text-align: center;
-  font-size: 14px;
-}
-
-.chart {
-  width: 100%;
-  background-color: white;
-  /* 圆角 */
-  border-radius: 8px;
-  /* 阴影 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  padding-top: 20px;
-  padding-bottom: 20px;
-}
-
-.description {
-  text-align: center;
-  font-size: 17px;
-  margin-left: 10px;
-}
-
-.description1 {
-  text-align: center;
-  font-size: 17px;
-  margin-left: 10px;
-}
-
-.datePickerContainer {
-  display: flex;
-  justify-content: flex-end;
-  position: relative;
-  padding: 50px 0 30px;
-}
-
-.text {
-  margin-left: 5px;
-  margin-right: 10px;
-}
-
-.picture_title {
-  text-align: center;
-  font-size: 14px;
-}
-
-.picture {
-  min-width: 100%;
-  display: block;
-  /* 将元素设置为块级元素 */
-  /* 确保图片不会超出父容器 */
-  // height: auto;
-  /* 保持图片比例 */
-  /* 使图片可以与 text-align 一起使用 */
-}
-
-.whole_container {
-  // position: relative;
-  display: block;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  margin: 0 0;
-  padding: 0 0;
-}
-
-.pic_container {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 20px 0;
-  width: 100%;
-  background-color: white;
-  border-radius: 8px;
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-}
-
-//以下新加代码
 .banner {
   position: relative;
   height: 420px;
   display: flex;
-  flex-direction: row;
   align-items: center;
 }
 
 .banner img {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: 50% -155px;
-  /* 水平居中，垂直向下偏移20px */
-  /* 确保图片在文字下方 */
-  z-index: 0;
+}
+
+.page-title {
+  position: relative;
+  z-index: 1;
+  margin-left: 20%;
+  color: rgb(19, 24, 36);
+  font-family: 'STXinwei';
+  font-size: 55px;
+  font-weight: 300;
 }
 
 .menu-container {
+  position: relative;
+  z-index: 2;
   display: flex;
-  //height: 105px;
-  height: 85px;
-  flex-direction: row;
   justify-content: center;
-  align-items: center;
+  height: 85px;
   margin-top: -50px;
 }
 
-ul.menu {
+.menu {
   position: relative;
-  list-style-type: none;
-  height: 100%;
   display: flex;
-  padding: 0px;
-  flex-direction: row;
-  justify-content: center;
-  background-color: white;
-  border-radius: 10px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.4);
+  margin: 0;
+  padding: 0;
   overflow: hidden;
-  /* 新增: 确保伪元素不会超出 ul.menu 边界 */
+  list-style: none;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
 }
 
-/* 新增: 添加一个伪元素用于整个选项卡区域的上半部分透明或阴影效果 */
-ul.menu::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 55%;
-  /* 仅覆盖上半部分 */
-  background-color: rgba(240, 240, 240, 0.8);
-  /* 上半部分透明效果，或更改为 box-shadow 实现阴影效果 */
-  z-index: 0;
-  /* 确保伪元素在 li 元素下方 */
-  pointer-events: none;
-  /* 确保透明层不影响鼠标事件 */
-}
-
-ul.menu li {
-  position: relative;
+.menu li {
   display: flex;
   width: 250px;
-  height: 100%;
-  flex-direction: column;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   cursor: pointer;
-  /* 更改鼠标形状为手形 */
-  overflow: hidden;
-  /* 确保伪元素的边界与 li 元素一致 */
   font-size: 17px;
 }
 
-ul.menu li:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 50%;
-  width: 2px;
-  height: 50%;
-  background-color: #00000020;
-  transform: translateY(-50%);
-}
-
-// ul.menu li:hover::before {
-//   content: "";
-//   position: absolute;
-//   top: 0;
-//   left: 0;
-//   width: 100%;
-//   height: 100%;
-//   //background-color: rgba(240, 240, 240, 0.8); /* 浅灰色 */
-//   border-radius: 10px; /* 确保形状与选项卡一致 */
-//   pointer-events: none; /* 确保伪元素不影响鼠标事件 */
-//   z-index: 1; /* 确保覆盖层在文字和内容下方 */
-// }
-
-ul.menu li:hover p {
-  color: rgb(71, 72, 76);
-  z-index: 2;
-  /* 确保文字在覆盖层之上 */
-}
-
-/* 已经被选中的选项卡在鼠标悬停时字体颜色不变 */
-ul.menu li.chart-name-selected:hover p {
-  color: inherit; //保持原有颜色
+.chart-name-selected {
+  color: rgb(30, 158, 179);
 }
 
 .mov-box {
   position: absolute;
-  z-index: 3;
-  /* 确保滑动条在覆盖层之上 */
+  bottom: 0;
+  width: 125px;
+  height: 2px;
+  transform: translateX(50%);
+  background: rgb(143, 178, 201);
+  transition: left 0.3s ease;
 }
 
-.chart-name-selected {
-  color: rgb(30, 158, 179)
+.content-shell,
+.chart-selector {
+  margin-right: 10%;
+  margin-left: 10%;
 }
 
-.text-container {
-  position: relative;
-  margin: 0px auto;
+.date-picker-container,
+.date-independent-note {
+  display: flex;
+  justify-content: flex-end;
+  padding: 50px 0 30px;
+}
+
+.date-independent-note {
+  color: #606266;
+}
+
+.description {
+  padding: 18px;
   text-align: center;
-  background-color: rgba(239, 242, 252, 0.801);
-  ;
-  /* 淡紫色 */
-  //display: flex;
-  padding: 20px;
+  font-size: 17px;
+  background: rgba(239, 242, 252, 0.8);
   border-radius: 8px;
-  /* 可选的圆角 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  /* 阴影 */
-  //font-family: 'STKaiti';
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.chart-selector {
+  position: relative;
+  min-height: 500px;
+  margin-top: 28px;
+  margin-bottom: 40px;
+  overflow: hidden;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.chart-selector.has-state {
+  min-height: 260px;
+}
+
+.chart-title {
+  margin: 20px 0 0;
+  text-align: center;
+  font-size: 18px;
+}
+
+.chart {
+  height: 500px;
+}
+
+.picture-container {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 500px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.picture-container h2,
+.picture-container p {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.picture-container img {
+  width: clamp(480px, 58%, 700px);
+  max-width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.arrow-left,
+.arrow-right {
+  position: absolute;
+  top: 0;
+}
+
+.arrow-left {
+  left: 0;
+}
+
+.arrow-right {
+  right: 0;
+}
+
+.state-panel {
+  display: flex;
+  width: min(560px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 28px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  background: rgba(250, 250, 250, 0.82);
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+}
+
+.state-panel :deep(.el-button) {
+  position: static;
+  width: auto;
+  min-width: 112px;
+  height: 38px;
+  align-self: center;
+  padding: 8px 20px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .menu li {
+    width: 45vw;
+  }
+
+  .page-title {
+    margin-left: 8%;
+    font-size: 40px;
+  }
+
+  .content-shell,
+  .chart-selector {
+    margin-right: 4%;
+    margin-left: 4%;
+  }
 }
 </style>

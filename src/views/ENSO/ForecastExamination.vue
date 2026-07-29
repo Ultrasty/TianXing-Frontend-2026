@@ -1,481 +1,602 @@
 <script setup>
-import { ref, onMounted, reactive, watch, defineExpose, computed } from "vue";
-import * as echarts from "echarts";
-import axios from "axios";
-import VChart from 'vue-echarts';
-import { nextTick } from "vue";
-import { configProviderContextKey } from "element-plus";
-/* 时间选择器 -- begin */
-const currentDate = ref(new Date('2023-2'));   //  赋初值
-const start_year = computed(() => {
-  return currentDate.value.getFullYear();
-});
-const start_month = computed(() => {
-  return currentDate.value.getMonth() + 1;
-});
+import { computed, onMounted, ref } from 'vue'
+import axios from 'axios'
+import VChart from 'vue-echarts'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import bannerImg from '@/assets/enso1.jpg'
+import { requestErrorMessage } from '@/utils/requestError'
 
-const start_time = ref(null);     //可选时间范围
-const end_time = ref(null);
-//此处利用monthly comparison调接口获取未切换标签时的时间范围
-axios.get('/enso/monthlyComparison/getInitData')
-  .then(res => {
-    if (res.data && res.data.start && res.data.end) {
-      start_time.value = new Date(res.data.start.replace(/-/g, '/'));
-      end_time.value = new Date(res.data.end.replace(/-/g, '/'));
+const chartNames = ['逐月比对', '预报误差', '误差分析', '相关系数']
+const chartSelected = ref(0)
+const descriptions = ref([
+  '此处为预测结果汇总折线图。',
+  '此处展示所选起报月份的预测结果、官方记录及二者绝对差值。',
+  '此处为不同起报月份的绝对差值分布箱型图。',
+  '此处为不同起报月份的相关性折线图。',
+])
+
+const dateRanges = ref([
+  { start: null, end: null },
+  { start: null, end: null },
+  { start: null, end: null },
+  { start: null, end: null },
+])
+const selectedDates = ref([null, null, null, null])
+const rangeLoading = ref([false, false, false, false])
+const rangeErrors = ref(['', '', '', ''])
+const dataLoading = ref([false, false, false, false])
+const dataErrors = ref(['', '', '', ''])
+const rangeRequestIds = [0, 0, 0, 0]
+const requestIds = [0, 0, 0, 0]
+
+const chartOptions = ref([{}, {}, {}, {}])
+const errorOptions = ref([])
+const errorIndex = ref(0)
+
+const currentDate = computed({
+  get: () => selectedDates.value[chartSelected.value],
+  set: (value) => {
+    selectedDates.value[chartSelected.value] = value
+  },
+})
+const activeRange = computed(() => dateRanges.value[chartSelected.value])
+const activeOption = computed(() => (
+  chartSelected.value === 1
+    ? errorOptions.value[errorIndex.value] || {}
+    : chartOptions.value[chartSelected.value] || {}
+))
+const hasActiveData = computed(() => Object.keys(activeOption.value || {}).length > 0)
+
+function parseYearMonth(value) {
+  const match = /^(\d{4})-(\d{1,2})$/.exec(String(value || '').trim())
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  if (month < 1 || month > 12) return null
+  return new Date(year, month - 1, 1)
+}
+
+function monthNumber(date) {
+  return date.getFullYear() * 12 + date.getMonth()
+}
+
+function applyRange(indices, startValue, endValue) {
+  const start = parseYearMonth(startValue)
+  const end = parseYearMonth(endValue)
+  if (!start || !end || monthNumber(start) > monthNumber(end)) {
+    throw new Error('Invalid ENSO examination date range')
+  }
+
+  indices.forEach((index) => {
+    dateRanges.value[index] = { start, end }
+    const current = selectedDates.value[index]
+    const currentValue = current ? monthNumber(current) : null
+    if (
+      currentValue === null
+      || currentValue < monthNumber(start)
+      || currentValue > monthNumber(end)
+    ) {
+      selectedDates.value[index] = new Date(end)
+    }
+  })
+}
+
+async function loadRange(indices, endpoint, startKey, endKey) {
+  const requestVersions = new Map(
+    indices.map((index) => [index, ++rangeRequestIds[index]]),
+  )
+  const isCurrent = () => indices.every(
+    (index) => requestVersions.get(index) === rangeRequestIds[index],
+  )
+
+  indices.forEach((index) => {
+    rangeLoading.value[index] = true
+    rangeErrors.value[index] = ''
+  })
+
+  try {
+    const response = await axios.get(endpoint)
+    if (!isCurrent()) return
+    applyRange(indices, response.data?.[startKey], response.data?.[endKey])
+  } catch (error) {
+    if (!isCurrent()) return
+    indices.forEach((index) => {
+      dateRanges.value[index] = { start: null, end: null }
+      rangeErrors.value[index] = requestErrorMessage(
+        error,
+        `${chartNames[index]}可选日期加载失败`,
+      )
+    })
+  } finally {
+    if (isCurrent()) {
+      indices.forEach((index) => {
+        rangeLoading.value[index] = false
+      })
+    }
+  }
+}
+
+function loadAllRanges() {
+  return Promise.all([
+    loadRange(
+      [0, 1],
+      '/enso/monthlyComparison/getInitData',
+      'start',
+      'end',
+    ),
+    loadRange(
+      [2],
+      '/enso/errorBox/getInitData',
+      'earliestDate',
+      'latestDate',
+    ),
+    loadRange(
+      [3],
+      '/enso/errorCorr/getInitData',
+      'earliestDate',
+      'latestDate',
+    ),
+  ])
+}
+
+function limitedDateRange(time) {
+  const range = activeRange.value
+  if (!range?.start || !range?.end) return false
+  const value = monthNumber(time)
+  return value < monthNumber(range.start) || value > monthNumber(range.end)
+}
+
+function endpointFor(index) {
+  return [
+    '/enso/predictionExamination/monthlyComparison',
+    '/enso/predictionExamination/error',
+    '/enso/predictionExamination/errorBox',
+    '/enso/predictionExamination/errorCorr',
+  ][index]
+}
+
+async function loadChart(index = chartSelected.value) {
+  const date = selectedDates.value[index]
+  if (!date) return
+
+  const requestId = ++requestIds[index]
+  dataLoading.value[index] = true
+  dataErrors.value[index] = ''
+  if (index === 1) {
+    errorOptions.value = []
+    errorIndex.value = 0
+  } else {
+    chartOptions.value[index] = {}
+  }
+
+  try {
+    const response = await axios.get(endpointFor(index), {
+      params: {
+        year: date.getFullYear(),
+        month: date.getMonth() + 1,
+      },
+    })
+    if (requestId !== requestIds[index]) return
+
+    if (index === 1) {
+      const options = Array.isArray(response.data?.option)
+        ? response.data.option.filter((item) => item && typeof item === 'object')
+        : []
+      if (options.length === 0) throw new Error('Empty ENSO error chart list')
+      errorOptions.value = options
+      errorIndex.value = 0
     } else {
-      start_time.value = null;
-      end_time.value = null;
-      console.warn("获取时间范围数据失败，返回数据不完整", res.data);
+      const option = response.data?.option
+      if (
+        !option
+        || typeof option !== 'object'
+        || Object.keys(option).length === 0
+      ) {
+        throw new Error('Invalid ENSO examination chart')
+      }
+      chartOptions.value[index] = option
     }
-  });
 
-// start_time.value = new Date('2023-1');      //暂时写死范围
-// end_time.value = new Date('2023-6');
-const limitedDateRange = (time) => {
-  return time.getTime() < start_time.value || time.getTime() > end_time.value;
-};
-/* 根据选择页更新限制范围 ！！为了适应新版前端已经更改！！*/
-function handleClick(chartName, index) {
-  chartSelected.value = index;
-  console.log(chartName);
-  if (chartName == '逐月比对' || chartName == '预报误差') {
-    axios.get('/enso/monthlyComparison/getInitData')
-      .then(res => {
-        if (res.data && res.data.start && res.data.end) {
-          start_time.value = new Date(res.data.start.replace(/-/g, '/'));
-          end_time.value = new Date(res.data.end.replace(/-/g, '/'));
-        } else {
-          start_time.value = null;
-          end_time.value = null;
-          console.warn("获取时间范围数据失败，返回数据不完整", res.data);
-        }
-      });
-  }
-  else if (chartName == '误差分析') {
-    axios.get('/enso/errorBox/getInitData')
-      .then(res => {
-        if (res.data && res.data.earliestDate && res.data.latestDate) {
-          start_time.value = new Date(res.data.earliestDate.replace(/-/g, '/'));
-          end_time.value = new Date(res.data.latestDate.replace(/-/g, '/'));
-        } else {
-          start_time.value = null;
-          end_time.value = null;
-          console.warn("获取时间范围数据失败，返回数据不完整", res.data);
-        }
-      });
-  }
-  else { //相关系数
-    axios.get('/enso/errorCorr/getInitData')
-      .then(res => {
-        if (res.data && res.data.earliestDate && res.data.latestDate) {
-          start_time.value = new Date(res.data.earliestDate.replace(/-/g, '/'));
-          end_time.value = new Date(res.data.latestDate.replace(/-/g, '/'));
-        } else {
-          start_time.value = null;
-          end_time.value = null;
-          console.warn("获取时间范围数据失败，返回数据不完整", res.data);
-        }
-      });
+    if (typeof response.data?.text === 'string' && response.data.text.trim()) {
+      descriptions.value[index] = response.data.text
+    }
+  } catch (error) {
+    if (requestId !== requestIds[index]) return
+    dataErrors.value[index] = requestErrorMessage(
+      error,
+      `${chartNames[index]}数据加载失败`,
+    )
+  } finally {
+    if (requestId === requestIds[index]) dataLoading.value[index] = false
   }
 }
-/* 时间选择器 -- end */
 
-var chart2_option; //存储从后端返回的chart2的option
-var index_month = 0; //切换页时修改这个索引
+async function selectChart(index) {
+  chartSelected.value = index
+  if (!activeRange.value?.start) return
 
-const chart1 = ref({})
-const chart2 = ref({})
-const chart3 = ref({})
-const chart4 = ref({})
-/* chart1 ,chart2 的下方文字描述 */
-let Chart1_Description = reactive({ single: true, text: '此处为预测结果汇总折线图。' })
-let Chart2_Description = reactive({ single: true, text: '此处的12副图分别为从2022年2月~2023年1月起报的预测结果、官方记录结果及二者绝对差值图（柱状）。' })
-/* chart3 ,chart4 的下方文字描述 */
-let Chart3_Description = reactive({ single: true, text: '此处为不同起报月份的绝对差值分布箱型图。' })
-let Chart4_Description = reactive({ single: true, text: '此处为不同起报月份的相关性折线图。' })
-
-
-/* 赋初值 */
-//逐月对比
-axios.get('/enso/predictionExamination/monthlyComparison?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-  .then(res => {
-    chart1.value = res.data.option;
-    Chart1_Description.text = res.data.text
-  });
-//预报误差
-axios.get('/enso/predictionExamination/error?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-  .then(res => {
-    chart2_option = res.data.option;
-    chart2.value = chart2_option[0];
-    Chart2_Description.text = res.data.text;
-  });
-//误差分析
-axios.get('/enso/predictionExamination/errorBox?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-  .then(res => {
-    chart3.value = res.data.option
-    Chart3_Description.text = res.data.text
-  });
-//相关系数
-axios.get('/enso/predictionExamination/errorCorr?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-  .then(res => {
-    chart4.value = res.data.option
-    Chart4_Description.text = res.data.text
-  });
-
-/* 图表更新 */
-function update_charts() {
-  //使元素失去焦点
-  document.activeElement.blur();
-
-  axios.get('/enso/predictionExamination/monthlyComparison?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-    .then(res => {
-      chart1.value = res.data.option
-      Chart1_Description.text = res.data.text
-    });
-  axios.get('/enso/predictionExamination/error?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-    .then(res => {
-      chart2_option = []; //先置空
-      index_month = 0; //设置索引月为0
-      chart2_option = res.data.option;
-      chart2.value = chart2_option[0];
-      Chart2_Description.text = res.data.text
-    });
-  axios.get('/enso/predictionExamination/errorBox?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-    .then(res => {
-      chart3.value = res.data.option
-      Chart3_Description.text = res.data.text
-    });
-  axios.get('/enso/predictionExamination/errorCorr?year=' + Number(start_year.value) + '&month=' + Number(start_month.value))
-    .then(res => {
-      chart4.value = res.data.option
-      Chart4_Description.text = res.data.text
-    });
+  const hasData = index === 1
+    ? errorOptions.value.length > 0
+    : Object.keys(chartOptions.value[index] || {}).length > 0
+  if (!hasData) await loadChart(index)
 }
 
-const buttonLeft = ref(null);
-const buttonRight = ref(null);
-
-/* chart2左右切换 -- begin */
-function change_Month(flag) {
-
-  if (flag === "left") {
-    if (index_month > 0) {
-      index_month--;
-    }
-    else {
-      index_month = 11;
-    }
-    buttonLeft.value.$el.blur();
-  }
-  else if (flag === "right") {
-    if (index_month < 11) {
-      index_month++;
-    }
-    else {
-      index_month = 0;
-    }
-    buttonRight.value.$el.blur();
-  }
-
-  chart2.value = chart2_option[index_month];
+function handleDateChange() {
+  document.activeElement?.blur()
+  loadChart()
 }
-/* chart2左右切换 -- end */
 
-defineExpose({
-  change_Month
-});
+async function retryRange() {
+  if (chartSelected.value <= 1) {
+    await loadRange(
+      [0, 1],
+      '/enso/monthlyComparison/getInitData',
+      'start',
+      'end',
+    )
+  } else if (chartSelected.value === 2) {
+    await loadRange(
+      [2],
+      '/enso/errorBox/getInitData',
+      'earliestDate',
+      'latestDate',
+    )
+  } else {
+    await loadRange(
+      [3],
+      '/enso/errorCorr/getInitData',
+      'earliestDate',
+      'latestDate',
+    )
+  }
 
-/* 新版添加的代码========================================================== */
-import bannerImg from '@/assets/enso1.jpg';
+  if (activeRange.value?.start) await loadChart()
+}
 
-
-const chartSelected = ref(0);
-
-const chartNames = ['逐月比对', '预报误差', '误差分析', '相关系数'];
-
-const moveBoxLeft = computed(() => {
-  return chartSelected.value * 250;
-});
+function changeErrorChart(direction) {
+  const total = errorOptions.value.length
+  if (total < 2) return
+  errorIndex.value = direction === 'left'
+    ? (errorIndex.value - 1 + total) % total
+    : (errorIndex.value + 1) % total
+}
 
 const movBoxStyle = computed(() => ({
-  position: "absolute",
-  bottom: "0px",
-  left: `${moveBoxLeft.value}px`,
-  height: "2px",
-  width: "125px",
-  transform: "translateX(50%)",
-  backgroundColor: "rgb(143,178,201)",
-  transition: "left 0.3s ease"
-}));
+  left: `${chartSelected.value * 250}px`,
+}))
 
-
-/* 新版代码END============================================================ */
-
-import {
-  ArrowLeft,
-  ArrowRight,
-} from '@element-plus/icons-vue'
+onMounted(async () => {
+  await loadAllRanges()
+  if (dateRanges.value[0].start) await loadChart(0)
+})
 </script>
 
 <template>
-  <div class="pageContent">
+  <div class="page-content">
     <div class="banner">
-      <img :src="bannerImg" />
-      <h3 class="title">ENSO预测结果检验</h3>
+      <img :src="bannerImg" alt="">
+      <h3 class="page-title">ENSO预测结果检验</h3>
     </div>
-
 
     <div class="menu-container">
       <ul class="menu">
         <div :style="movBoxStyle" class="mov-box"></div>
-        <li v-for="(chartName, index) of chartNames" :key="chartName" @click="handleClick(chartName, index)"
-          :class="{ 'chart-name-selected': chartSelected === index }">
+        <li
+          v-for="(chartName, index) in chartNames"
+          :key="chartName"
+          :class="{ 'chart-name-selected': chartSelected === index }"
+          @click="selectChart(index)"
+        >
           <p>{{ chartName }}</p>
         </li>
       </ul>
     </div>
 
-    <div style="margin: 0 10%">
-
-
-      <div class="datePickerContainer">
-        <el-date-picker @change="update_charts()" v-model="currentDate" type="month" :clearable="false"
-          :disabledDate="limitedDateRange" />
+    <section class="content-shell">
+      <div class="date-picker-container">
+        <el-date-picker
+          v-model="currentDate"
+          type="month"
+          :clearable="false"
+          :disabled="rangeLoading[chartSelected] || !activeRange.start"
+          :disabled-date="limitedDateRange"
+          @change="handleDateChange"
+        />
       </div>
-      
-      <div class="text-container" v-if="chartSelected === 0">
-        <p class="text_of_graph">{{ Chart1_Description.text }}</p>
+
+      <div v-if="rangeErrors[chartSelected]" class="state-panel">
+        <el-alert :title="rangeErrors[chartSelected]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="retryRange">重试日期加载</el-button>
       </div>
-      <div class="text-container" v-if="chartSelected === 1">
-        <p class="text_of_graph">{{ Chart2_Description.text }}</p>
+
+      <div class="description">{{ descriptions[chartSelected] }}</div>
+    </section>
+
+    <section
+      class="chart-selector"
+      :class="{ 'has-state': Boolean(dataErrors[chartSelected]) }"
+      v-loading="dataLoading[chartSelected]"
+    >
+      <div v-if="dataErrors[chartSelected]" class="state-panel">
+        <el-alert :title="dataErrors[chartSelected]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="loadChart()">重新加载</el-button>
       </div>
-      <div class="text-container" v-if="chartSelected === 2">
-        <p class="text_of_graph">{{ Chart3_Description.text }}</p>
-      </div>
-      <div class="text-container" v-if="chartSelected === 3">
-        <p class="text_of_graph">{{ Chart4_Description.text }}</p>
-      </div>
-    </div>
 
-    <div>
-      <p></p>
-    </div>
-    
-    <!-- 这里的chart-selector为全局样式，不用在本文件中添加 -->
-    <div class="chart-selector" v-if="chartSelected === 0">
-      <v-chart class="chart1" :option="chart1" autoresize></v-chart>
-    </div>
+      <template v-else-if="hasActiveData">
+        <p v-if="chartSelected === 1" class="chart-count">
+          {{ errorIndex + 1 }}/{{ errorOptions.length }}
+        </p>
+        <v-chart class="chart" :option="activeOption" autoresize />
+        <template v-if="chartSelected === 1 && errorOptions.length > 1">
+          <el-button
+            type="primary"
+            class="arrow-left"
+            :icon="ArrowLeft"
+            aria-label="上一张误差图"
+            @click="changeErrorChart('left')"
+          />
+          <el-button
+            type="primary"
+            class="arrow-right"
+            :icon="ArrowRight"
+            aria-label="下一张误差图"
+            @click="changeErrorChart('right')"
+          />
+        </template>
+      </template>
 
-    <div class="chart-selector" v-else-if="chartSelected === 1">
-      <v-chart class="chart" :option="chart2" autoresize></v-chart>
-      <el-button ref="buttonLeft" type="primary" class="arrow-left" :icon="ArrowLeft"
-        @click="change_Month('left')"></el-button>
-      <el-button ref="buttonRight" type="primary" class="arrow-right" :icon="ArrowRight"
-        @click="change_Month('right')"></el-button>
-    </div>
-
-    <div class="chart-selector" v-else-if="chartSelected === 2">
-      <v-chart class="chart" :option="chart3" autoresize></v-chart>
-    </div>
-
-
-    <div class="chart-selector" v-else-if="chartSelected === 3">
-      <v-chart class="chart" :option="chart4" autoresize></v-chart>
-    </div>
+      <el-empty
+        v-else-if="!dataLoading[chartSelected]"
+        :description="`暂无${chartNames[chartSelected]}数据`"
+      />
+    </section>
   </div>
-
 </template>
 
 <style scoped lang="scss">
-.title {
-  font-family: 'STXinwei';
-  font-weight: 300; //调整字体粗细
-  text-align: center;
-  font-size: 55px;
-  margin-left: 20%;
-  letter-spacing: 1px; /* 字符间距 */
-  z-index: 1; /* 确保图片在文字下方 */
-  color:rgb(251, 236, 222);
-
+.page-content {
+  min-height: 100%;
 }
 
-.datePickerContainer {
-  display: flex;
-  justify-content: flex-end;
-  position: relative;
-  padding: 50px 0 30px;
-}
-
-.text {
-  margin-left: 5px;
-  margin-right: 10px;
-}
-
-/*chart1、2 的表和文字*/
-.chart1 {
-  height: 50vh;
-  min-height: 700px;
-  background-color:white;
-  /* 圆角 */
-  border-radius: 8px;
-  /* 阴影 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  padding-top: 20px;
-  padding-bottom: 20px;
-}
-
-.chart {
-  width:100%;
-  display: flex;
-  height: 50vh;
-  min-height: 500px;
-  background-color:white;
-  /* 圆角 */
-  border-radius: 8px;
-  /* 阴影 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  padding-top: 20px;
-  padding-bottom: 20px;
-}
-
-.text_of_graph {
-  text-align: center;
-  font-size: 17px;
-}
-
-
-/* 预报误差页面的容器 没用了*/
-// .chart-container {
-//   size: 100%
-// }
-
-/* 新版添加的代码 =====================================================*/
 .banner {
   position: relative;
   height: 420px;
   display: flex;
-  flex-direction: row;
   align-items: center;
 }
 
 .banner img {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  object-position: 50% -190px; /* 水平居中，垂直向下偏移20px */
-  /* 确保图片在文字下方 */
-  z-index: 0;
+  object-position: 50% -190px;
+}
+
+.page-title {
+  position: relative;
+  z-index: 1;
+  margin-left: 20%;
+  color: rgb(251, 236, 222);
+  font-family: 'STXinwei';
+  font-size: 55px;
+  font-weight: 300;
 }
 
 .menu-container {
+  position: relative;
+  z-index: 2;
   display: flex;
-  //height: 105px;
-  height: 85px;
-  flex-direction: row;
   justify-content: center;
-  align-items: center;
+  height: 85px;
   margin-top: -50px;
 }
 
-ul.menu {
+.menu {
   position: relative;
-  list-style-type: none;
-  height: 100%;
   display: flex;
-  padding: 0px;
-  flex-direction: row;
-  justify-content: center;
-  background-color: white;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  list-style: none;
+  background: white;
   border-radius: 10px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.4);
-  overflow: hidden; /* 新增: 确保伪元素不会超出 ul.menu 边界 */
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
 }
-/* 新增: 添加一个伪元素用于整个选项卡区域的上半部分透明或阴影效果 */
-ul.menu::before {
-  content: "";
+
+.menu::before {
   position: absolute;
+  z-index: 0;
   top: 0;
   left: 0;
   width: 100%;
-  height: 55%; /* 仅覆盖上半部分 */
-  background-color: rgba(240, 240, 240, 0.8); /* 上半部分透明效果，或更改为 box-shadow 实现阴影效果 */
-  z-index: 0; /* 确保伪元素在 li 元素下方 */
-  pointer-events: none; /* 确保透明层不影响鼠标事件 */
+  height: 55%;
+  background: rgba(240, 240, 240, 0.8);
+  content: '';
+  pointer-events: none;
 }
-ul.menu li {
+
+.menu li {
   position: relative;
   display: flex;
   width: 250px;
+  min-width: 250px;
   height: 100%;
   flex-direction: column;
-  justify-content: center;
   align-items: center;
-  cursor: pointer;
-  /* 更改鼠标形状为手形 */
+  justify-content: center;
   overflow: hidden;
-  /* 确保伪元素的边界与 li 元素一致 */
+  cursor: pointer;
   font-size: 17px;
 }
 
-ul.menu li:not(:last-child)::after {
-  content: "";
+.menu li p {
+  position: relative;
+  z-index: 1;
+}
+
+.menu li:not(:last-child)::after {
   position: absolute;
-  right: 0;
   top: 50%;
+  right: 0;
   width: 2px;
   height: 50%;
-  background-color: #00000020;
   transform: translateY(-50%);
+  background: rgba(0, 0, 0, 0.125);
+  content: '';
 }
-
-// ul.menu li:hover::before {
-//   content: "";
-//   position: absolute;
-//   top: 0;
-//   left: 0;
-//   width: 100%;
-//   height: 100%;
-//   //background-color: rgba(240, 240, 240, 0.8); /* 浅灰色 */
-//   border-radius: 10px; /* 确保形状与选项卡一致 */
-//   pointer-events: none; /* 确保伪元素不影响鼠标事件 */
-//   z-index: 1; /* 确保覆盖层在文字和内容下方 */
-// }
-
-ul.menu li:hover p {
-  color: rgb(71, 72, 76);
-  z-index: 2; /* 确保文字在覆盖层之上 */
-}
-/* 已经被选中的选项卡在鼠标悬停时字体颜色不变 */
-ul.menu li.chart-name-selected:hover p {
-  color: inherit; //保持原有颜色
-}
-.mov-box {
-  position: absolute;
-  z-index: 3; /* 确保滑动条在覆盖层之上 */
-}
-
 
 .chart-name-selected {
-  color:rgb(30, 158, 179)
+  color: rgb(30, 158, 179);
 }
 
+.mov-box {
+  position: absolute;
+  bottom: 0;
+  width: 125px;
+  height: 2px;
+  transform: translateX(50%);
+  background: rgb(143, 178, 201);
+  transition: left 0.3s ease;
+}
 
-.text-container {
-  position: relative;
-  margin: 0px auto;
+.content-shell,
+.chart-selector {
+  margin-right: 10%;
+  margin-left: 10%;
+}
+
+.date-picker-container {
+  display: flex;
+  justify-content: flex-end;
+  padding: 50px 0 30px;
+}
+
+.description {
+  padding: 21px 16px;
   text-align: center;
-  background-color: rgba(239, 242, 252, 0.801);
-  ;
-  /* 淡紫色 */
-  //display: flex;
-  padding: 4px;
+  font-size: 17px;
+  background: rgba(239, 242, 252, 0.8);
   border-radius: 8px;
-  /* 可选的圆角 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  /* 阴影 */
-  //font-family: 'STKaiti';
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.chart-selector {
+  position: relative;
+  min-height: 520px;
+  margin-top: 16px;
+  margin-bottom: 40px;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.chart-selector.has-state {
+  min-height: 260px;
+}
+
+.chart {
+  width: 100%;
+  height: 50vh;
+  min-height: 500px;
+  padding: 20px 0;
+  box-sizing: content-box;
+}
+
+.chart-count {
+  position: absolute;
+  z-index: 3;
+  top: 16px;
+  right: 88px;
+  min-width: 54px;
+  margin: 0;
+  padding: 4px 10px;
+  box-sizing: border-box;
+  color: #606266;
+  text-align: center;
+  line-height: 20px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(96, 98, 102, 0.18);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.arrow-left,
+.arrow-right {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  pointer-events: none;
+}
+
+.arrow-left :deep(.el-icon),
+.arrow-right :deep(.el-icon) {
+  z-index: 1;
+  padding: 24px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.arrow-left:focus,
+.arrow-right:focus {
+  outline: none;
+}
+
+.arrow-left:focus-visible :deep(.el-icon),
+.arrow-right:focus-visible :deep(.el-icon) {
+  box-shadow: 0 0 0 2px rgba(45, 141, 210, 0.55);
+}
+
+.arrow-left {
+  left: 0;
+}
+
+.arrow-right {
+  right: 0;
+}
+
+.state-panel {
+  display: flex;
+  width: min(560px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 28px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  background: rgba(250, 250, 250, 0.82);
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+}
+
+.state-panel :deep(.el-button) {
+  position: static;
+  width: auto;
+  min-width: 112px;
+  height: 38px;
+  align-self: center;
+  padding: 8px 20px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .menu {
+    overflow-x: auto;
+  }
+
+  .page-title {
+    margin-left: 8%;
+    font-size: 40px;
+  }
+
+  .content-shell,
+  .chart-selector {
+    margin-right: 4%;
+    margin-left: 4%;
+  }
 }
 </style>

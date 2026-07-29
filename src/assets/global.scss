@@ -23,7 +23,10 @@
 * 这些按钮的位置取决于它们的直接父元素，务必为它们的父元素设置position属性！
 * 它们会分属左右两边，紧贴边界，充满高度
 */
-.el-button{
+.el-button.arrow-left,
+.el-button.arrow-right,
+.el-button.arrowLeft,
+.el-button.arrowRight {
   position: absolute;
   top: 0;
   width: 7%;
@@ -51,14 +54,18 @@
     border-radius: 0;
   }
 
-  &.arrow-left,&.arrowLeft{
+  &.arrow-left,
+  &.arrowLeft {
     left: 0;
+
     &:active {
       transform: perspective(600px) rotateY(15deg) scale(0.95);
     }
+
     &:hover:before{
       left:0;
     }
+
     &:before{
       left: -100%;
       background: linear-gradient(to left, transparent, rgba(0, 64, 192, 0.3));
@@ -66,14 +73,18 @@
     }
   }
 
-  &.arrow-right,&.arrowRight{
+  &.arrow-right,
+  &.arrowRight {
     right:0;
+
     &:active {
       transform: perspective(600px) rotateY(-15deg) scale(0.95);
     }
+
     &:hover:before{
       right:0;
     }
+
     &:before{
       right: -100%;
       background: linear-gradient(to right, transparent, rgba(0, 64, 192, 0.3));
