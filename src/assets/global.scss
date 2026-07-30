@@ -23,61 +23,71 @@
 * 这些按钮的位置取决于它们的直接父元素，务必为它们的父元素设置position属性！
 * 它们会分属左右两边，紧贴边界，充满高度
 */
-.el-button{
-  position: absolute;
-  top: 0;
-  width: 7%;
-  height: 100%;
+.chart-selector,
+.chart-selector-with-button {
+  .el-button {
+    &.arrow-left,
+    &.arrowLeft,
+    &.arrow-right,
+    &.arrowRight {
+      position: absolute;
+      top: 0;
+      width: 7%;
+      height: 100%;
 
-  font-size: 50px;
-  border: none;
-  overflow: hidden;
-  border-radius: 0;
-  color: rgba(128, 128, 128, 0.4);
-  background: transparent;
+      font-size: 50px;
+      border: none;
+      overflow: hidden;
+      border-radius: 0;
+      color: rgba(128, 128, 128, 0.4);
+      background: transparent;
 
-  &:before{
-    content: '';
-    position: absolute;
-    top: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 0;
-  }
+      &:before{
+        content: '';
+        position: absolute;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 0;
+      }
 
-  &:hover {
-    color: white;
-    background: transparent;
-    border-radius: 0;
-  }
-
-  &.arrow-left,&.arrowLeft{
-    left: 0;
-    &:active {
-      transform: perspective(600px) rotateY(15deg) scale(0.95);
+      &:hover {
+        color: white;
+        background: transparent;
+        border-radius: 0;
+      }
     }
-    &:hover:before{
-      left:0;
-    }
-    &:before{
-      left: -100%;
-      background: linear-gradient(to left, transparent, rgba(0, 64, 192, 0.3));
-      transition: left 0.3s ease;
-    }
-  }
 
-  &.arrow-right,&.arrowRight{
-    right:0;
-    &:active {
-      transform: perspective(600px) rotateY(-15deg) scale(0.95);
+    &.arrow-left,
+    &.arrowLeft{
+      left: 0;
+      &:active {
+        transform: perspective(600px) rotateY(15deg) scale(0.95);
+      }
+      &:hover:before{
+        left:0;
+      }
+      &:before{
+        left: -100%;
+        background: linear-gradient(to left, transparent, rgba(0, 64, 192, 0.3));
+        transition: left 0.3s ease;
+      }
     }
-    &:hover:before{
+
+    &.arrow-right,
+    &.arrowRight{
       right:0;
-    }
-    &:before{
-      right: -100%;
-      background: linear-gradient(to right, transparent, rgba(0, 64, 192, 0.3));
-      transition: right 0.3s ease;
+      &:active {
+        transform: perspective(600px) rotateY(-15deg) scale(0.95);
+      }
+      &:hover:before{
+        right:0;
+      }
+      &:before{
+        right: -100%;
+        background: linear-gradient(to right, transparent, rgba(0, 64, 192, 0.3));
+        transition: right 0.3s ease;
+      }
     }
   }
 }

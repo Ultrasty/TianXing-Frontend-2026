@@ -10,6 +10,8 @@ import SeaIce_ForecastExamination from '@/views/SeaIce/ForecastExamination.vue';
 import NAOForecastResult from '@/views/NAO/ForecastResult.vue';
 import NAOForecastExamination from '@/views/NAO/ForecastExamination.vue';
 
+import AdminLogin from '@/views/admin/AdminLogin.vue';
+import AdminForecastResultImagePublish from '@/views/admin/ForecastResultImagePublish.vue';
 import UserView from '@/views/user/UserView.vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 
@@ -82,7 +84,37 @@ const router = createRouter({
 
             ],
         },
+        {
+            name: 'AdminLogin',
+            path: '/admin/login',
+            component: AdminLogin,
+            meta: {
+                title: 'AdminLogin',
+            },
+        },
+        {
+            name: 'AdminForecastResultImagePublish',
+            path: '/admin/forecast-result-images/publish',
+            component: AdminForecastResultImagePublish,
+            meta: {
+                title: 'AdminForecastResultImagePublish',
+                requiresAdminAuth: true,
+            },
+        },
     ],
 })
+
+router.beforeEach((to, _from, next) => {
+    if (to.meta.requiresAdminAuth && !localStorage.getItem('tianxing_admin_token')) {
+        next({
+            name: 'AdminLogin',
+            query: {
+                redirect: to.fullPath,
+            },
+        });
+        return;
+    }
+    next();
+});
 
 export default router;
