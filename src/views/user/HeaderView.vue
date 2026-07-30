@@ -94,6 +94,11 @@ const menus = ref([
       { title: '预测检验', name: 'SeaIce_ForecastExamination' },
     ],
   },
+  {
+    title: '数据管理',
+    name: 'ExaminationManage',
+    to: { name: 'ExaminationManage' }  // 使用 to 而非 path，与 GlobalWeather 保持一致
+  }
 ]);
 
 const nav_item_selected = ref<string | null>(null);

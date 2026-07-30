@@ -78,8 +78,15 @@ const router = createRouter({
                     },
                     path: 'NAO_ForecastExamination',
                     component: NAOForecastExamination,
+                },
+                {
+                      name: 'ExaminationManage',
+                      meta: {
+                      title: '预报评估管理',
+                  },
+                      path: 'admin/ExaminationManage',
+                      component: () => import('@/views/admin/ExaminationManage.vue'),
                 }
-
             ],
         },
     ],
