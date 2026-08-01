@@ -8,26 +8,36 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 // https://vitejs.dev/config/
 export default defineConfig({
   base: '/tianxing',
+
   plugins: [
     vue(),
+
     AutoImport({
       resolvers: [ElementPlusResolver()],
     }),
+
     Components({
       resolvers: [ElementPlusResolver()],
     }),
   ],
+
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
   },
+
   server: {
-  proxy: {
-    '/admin': {
-      target: 'http://localhost:8888',
-      changeOrigin: true,
+    port: 5173,
+
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8888',
+        changeOrigin: true,
+
+        // /api/enso/... 转成 /enso/...
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
     },
-  },
   },
 })

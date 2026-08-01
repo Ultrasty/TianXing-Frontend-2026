@@ -1,10 +1,9 @@
 <script setup lang="ts">
 import { RouterView } from 'vue-router'
 import axios from 'axios'
-axios.defaults.baseURL = 'https://tianxing.tongji.edu.cn/api/'
-//axios.defaults.baseURL = 'http://localhost:8888'
 
-
+// 本地开发时，请求先发送到 Vite 的 /api 代理
+axios.defaults.baseURL = '/api'
 </script>
 
 <template>
