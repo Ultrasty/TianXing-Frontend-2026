@@ -1,765 +1,587 @@
-<!-- src/views/admin/ExaminationManage.vue -->
-<script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Refresh, Download } from '@element-plus/icons-vue'
+<script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
+import { Back, Delete, Edit, Plus, Refresh, Upload, Connection, SwitchButton } from '@element-plus/icons-vue'
+import {
+  createEvaluation,
+  deleteEvaluation,
+  fetchEcmwfPreview,
+  getAdminApiError,
+  getEvaluationMetadata,
+  getEvaluations,
+  importEcmwfBatch,
+  importEvaluationFile,
+  updateEvaluation,
+  type EvaluationCategory,
+  type EvaluationMetadata,
+  type EvaluationPayload,
+  type EvaluationRecord,
+  type EcmwfPreview,
+  type ImportMode,
+} from '@/api/admin'
+import { clearAdminSession } from '@/utils/adminAuth'
 
-// API 封装，暂时使用 fake data
-const mockData = [
-  { id: 1, year: '2023', month: '01', varModel: 'ENS_3.4', category: 'ENSO', data: '{"rmse":0.32,"corr":0.87}' },
-  { id: 2, year: '2023', month: '02', varModel: 'ENS_3.4', category: 'ENSO', data: '{"rmse":0.28,"corr":0.91}' },
-  { id: 3, year: '2023', month: '03', varModel: 'AIFS_3.4', category: 'ENSO', data: '{"rmse":0.35,"corr":0.82}' },
-]
+const router = useRouter()
+const categories: EvaluationCategory[] = ['ENSO', 'NAO', 'SIC', 'SIE']
+const categoryDescriptions: Record<EvaluationCategory, string> = {
+  ENSO: 'ENSO 观测评估序列',
+  NAO: 'NAO 1–6 个月领先相关系数',
+  SIC: '海冰密集度误差与技巧指标',
+  SIE: '海冰范围误差分解指标',
+}
 
-// TODO: 换 API 
-const api = {
-  // 查询列表
-  getList: (params) => {
-    console.log('[API] 查询列表:', params)
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        let filtered = mockData
-        if (params.year) filtered = filtered.filter(d => d.year === params.year)
-        if (params.month) filtered = filtered.filter(d => d.month === params.month)
-        if (params.category) filtered = filtered.filter(d => d.category === params.category)
-        resolve({ data: { list: filtered, total: filtered.length } })
-      }, 300)
-    })
-  },
-  // 新增
-  add: (data) => {
-    console.log('[API] 新增:', data)
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const newItem = { ...data, id: Date.now() }
-        mockData.unshift(newItem)
-        resolve({ data: newItem })
-      }, 300)
-    })
-  },
-  // 更新
-  update: (data) => {
-    console.log('[API] 更新:', data)
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const index = mockData.findIndex(d => d.id === data.id)
-        if (index !== -1) {
-          mockData[index] = { ...mockData[index], ...data }
-        }
-        resolve({ data: mockData[index] })
-      }, 300)
-    })
-  },
-  // 删除
-  delete: (id) => {
-    console.log('[API] 删除:', id)
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        const index = mockData.findIndex(d => d.id === id)
-        if (index !== -1) {
-          mockData.splice(index, 1)
-        }
-        resolve({ data: {} })
-      }, 300)
-    })
-  },
-  // 从 ECMWF 获取原始数据（由队友提供接口）
-  fetchECMWF: (params) => {
-    console.log('[API] 从 ECMWF 获取:', params)
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        // 模拟 ECMWF 返回的原始数据
-        resolve({
-          data: {
-            raw: {
-              forecasts: [
-                { lead_time: 1, value: 0.52 },
-                { lead_time: 2, value: 0.61 },
-                { lead_time: 3, value: 0.73 },
-              ],
-              metadata: { model: params.model, source: 'ECMWF' }
-            }
-          }
-        })
-      }, 500)
-    })
+const metadata = ref<EvaluationMetadata | null>(null)
+const activeCategory = ref<EvaluationCategory>('ENSO')
+const loading = ref(false)
+const saving = ref(false)
+const rows = ref<EvaluationRecord[]>([])
+const total = ref(0)
+const pagination = reactive({ page: 1, pageSize: 20 })
+const filters = reactive({ year: '', month: '', day: '', varModel: '' })
+
+const editorVisible = ref(false)
+const editing = ref(false)
+const form = reactive({
+  id: 0,
+  category: 'ENSO' as EvaluationCategory,
+  year: '',
+  month: '',
+  day: '',
+  varModel: '',
+  data: '[\n  \n]',
+})
+
+const importVisible = ref(false)
+const importMode = ref<ImportMode>('REJECT')
+const importFile = ref<File | null>(null)
+const importing = ref(false)
+
+const ecmwfVisible = ref(false)
+const ecmwfLoading = ref(false)
+const ecmwfImporting = ref(false)
+const ecmwfPreview = ref<EcmwfPreview | null>(null)
+const ecmwf = reactive({
+  category: 'SIE' as EvaluationCategory,
+  year: String(new Date().getFullYear()),
+  month: String(new Date().getMonth() + 1),
+  day: String(new Date().getDate()),
+  varModel: 'RMSD',
+  date: '',
+  time: 0,
+  step: 24,
+  param: '2t',
+  levtype: 'sfc',
+  levelist: undefined as number | undefined,
+  model: 'ifs',
+  provider: 'ecmwf',
+  forecastType: 'fc',
+  reducer: 'MEAN' as 'MEAN' | 'ROW_MEAN' | 'SAMPLE',
+  maxPoints: 200,
+})
+
+const currentMetadata = computed(() => metadata.value?.categories[activeCategory.value])
+const editorMetadata = computed(() => metadata.value?.categories[form.category])
+const ecmwfSummary = computed(() => {
+  const raw = ecmwfPreview.value?.metadata || {}
+  const fields = Array.isArray(raw.fields) ? raw.fields : []
+  const firstField = (fields[0] || {}) as Record<string, unknown>
+  return {
+    provider: String(raw.source || '—'),
+    forecastDatetime: String(raw.forecastDatetime || '—'),
+    totalGridPoints: String(raw.totalGridPoints || '—'),
+    field: String(firstField.shortName || firstField.name || '—'),
+    units: String(firstField.units || '—'),
+  }
+})
+
+function hasField(category: EvaluationCategory, field: string) {
+  const fallback: Record<EvaluationCategory, string[]> = {
+    ENSO: ['year', 'data'],
+    NAO: ['year', 'month', 'varModel', 'data'],
+    SIC: ['year', 'month', 'day', 'varModel', 'data'],
+    SIE: ['year', 'month', 'varModel', 'data'],
+  }
+  return (metadata.value?.categories[category]?.requiredFields || fallback[category]).includes(field)
+}
+
+function varModels(category: EvaluationCategory, year: string) {
+  const models = metadata.value?.categories[category]?.allowedVarModels || []
+  return [...new Set(models.map((model) => model.replace('{year}', /^\d{4}$/.test(year) ? year : '{year}')))]
+}
+
+function normalizeFields(target: { category: EvaluationCategory; year: string; month: string; day: string; varModel: string }) {
+  if (target.category === 'NAO') {
+    target.year = 'all'
+    target.month = 'all'
+    target.day = ''
+  } else if (target.category === 'ENSO') {
+    target.month = ''
+    target.day = ''
+    target.varModel = ''
+  } else if (target.category === 'SIE') {
+    target.day = ''
+  }
+  const options = varModels(target.category, target.year).filter((value) => !value.includes('{year}'))
+  if (hasField(target.category, 'varModel') && !options.includes(target.varModel)) {
+    target.varModel = options[0] || ''
   }
 }
 
-// 页面 
-const loading = ref(false)
-const tableData = ref([])
-const total = ref(0)
-const dialogVisible = ref(false)
-const dialogTitle = ref('新增预报评估数据')
-const isEdit = ref(false)
-
-// 搜索表单
-const searchForm = reactive({
-  year: '',
-  month: '',
-  category: '',
-})
-
-// 数据表单
-const formData = reactive({
-  id: null,
-  year: '',
-  month: '',
-  varModel: '',
-  category: 'ENSO',
-  data: '',
-})
-
-// ECMWF 获取相关
-const ecmwfLoading = ref(false)
-const ecmwfParams = reactive({
-  year: '',
-  month: '',
-  model: 'ENS',
-})
-
-// manual：手动上传, ecmwf：从ECMWF获取）
-const dataSource = ref('manual')
-
-// ======================== 列表查询 ========================
-const loadData = async () => {
+async function loadData() {
   loading.value = true
   try {
-    const params = {}
-    if (searchForm.year) params.year = searchForm.year
-    if (searchForm.month) params.month = searchForm.month
-    if (searchForm.category) params.category = searchForm.category
-    
-    const res = await api.getList(params)
-    tableData.value = res.data.list || []
-    total.value = res.data.total || 0
+    const result = await getEvaluations({
+      category: activeCategory.value,
+      year: filters.year || undefined,
+      month: hasField(activeCategory.value, 'month') ? filters.month || undefined : undefined,
+      day: hasField(activeCategory.value, 'day') ? filters.day || undefined : undefined,
+      varModel: hasField(activeCategory.value, 'varModel') ? filters.varModel || undefined : undefined,
+      page: pagination.page,
+      pageSize: pagination.pageSize,
+    })
+    rows.value = result.items
+    total.value = result.total
   } catch (error) {
-    ElMessage.error('加载数据失败: ' + error.message)
+    ElMessage.error(getAdminApiError(error, '加载评估数据失败'))
   } finally {
     loading.value = false
   }
 }
 
-// 重置搜索
-const resetSearch = () => {
-  searchForm.year = ''
-  searchForm.month = ''
-  searchForm.category = ''
+function resetFilters() {
+  Object.assign(filters, { year: '', month: '', day: '', varModel: '' })
+  pagination.page = 1
   loadData()
 }
 
-// 打开新增弹窗 
-const handleAdd = () => {
-  dialogTitle.value = '新增预报评估数据'
-  isEdit.value = false
-  dataSource.value = 'manual'
-  // 重置表单
-  formData.id = null
-  formData.year = ''
-  formData.month = ''
-  formData.varModel = ''
-  formData.category = 'ENSO'
-  formData.data = ''
-  // 重置 ECMWF 参数
-  ecmwfParams.year = ''
-  ecmwfParams.month = ''
-  ecmwfParams.model = 'ENS'
-  dialogVisible.value = true
-}
-
-// 打开编辑弹窗
-const handleEdit = (row) => {
-  dialogTitle.value = '编辑预报评估数据'
-  isEdit.value = true
-  dataSource.value = 'manual'
-  Object.assign(formData, {
-    id: row.id,
-    year: row.year,
-    month: row.month,
-    varModel: row.varModel,
-    category: row.category,
-    data: row.data,
+function openCreate() {
+  editing.value = false
+  Object.assign(form, {
+    id: 0,
+    category: activeCategory.value,
+    year: activeCategory.value === 'NAO' ? 'all' : String(new Date().getFullYear()),
+    month: activeCategory.value === 'NAO' ? 'all' : '',
+    day: '',
+    varModel: '',
+    data: '[\n  \n]',
   })
-  dialogVisible.value = true
+  normalizeFields(form)
+  editorVisible.value = true
 }
 
-// 从 ECMWF 获取数据
-const handleFetchECMWF = async () => {
-  if (!ecmwfParams.year || !ecmwfParams.month) {
-    ElMessage.warning('请先填写年份和月份')
+function openEdit(row: EvaluationRecord) {
+  editing.value = true
+  Object.assign(form, {
+    id: row.id,
+    category: row.category,
+    year: row.year,
+    month: row.month || '',
+    day: row.day || '',
+    varModel: row.varModel || '',
+    data: JSON.stringify(row.data, null, 2),
+  })
+  editorVisible.value = true
+}
+
+function validateArray(value: unknown): value is unknown[] {
+  if (!Array.isArray(value) || value.length === 0) return false
+  const valid = (node: unknown): boolean => {
+    if (node === null || node === undefined) return false
+    if (typeof node === 'number') return Number.isFinite(node)
+    if (typeof node === 'string') return node.trim() !== '' && !['nan', 'infinity', '+infinity', '-infinity'].includes(node.toLowerCase())
+    if (Array.isArray(node)) return node.every(valid)
+    if (typeof node === 'object') return Object.values(node as Record<string, unknown>).every(valid)
+    return true
+  }
+  return value.every(valid)
+}
+
+function buildPayload(): EvaluationPayload {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(form.data)
+  } catch {
+    throw new Error('评估数据必须是合法 JSON')
+  }
+  if (!validateArray(parsed)) {
+    throw new Error('评估数据必须是不含空值的非空 JSON 数组')
+  }
+  if (!form.year.trim()) throw new Error('请填写年份')
+  if (hasField(form.category, 'month') && !form.month.trim()) throw new Error('请填写月份')
+  if (hasField(form.category, 'day') && !form.day.trim()) throw new Error('请填写日期')
+  if (hasField(form.category, 'varModel') && !form.varModel.trim()) throw new Error('请选择评估指标')
+  return {
+    year: form.year.trim(),
+    month: hasField(form.category, 'month') ? form.month.trim() : undefined,
+    day: hasField(form.category, 'day') ? form.day.trim() : undefined,
+    varModel: hasField(form.category, 'varModel') ? form.varModel.trim() : undefined,
+    data: parsed,
+    source: 'MANUAL',
+  }
+}
+
+async function saveRecord() {
+  saving.value = true
+  try {
+    const payload = buildPayload()
+    if (editing.value) {
+      await updateEvaluation(form.category, form.id, payload)
+      ElMessage.success('评估数据已更新')
+    } else {
+      await createEvaluation({ ...payload, category: form.category })
+      ElMessage.success('评估数据已发布')
+    }
+    editorVisible.value = false
+    await loadData()
+  } catch (error) {
+    ElMessage.error(getAdminApiError(error, error instanceof Error ? error.message : '保存失败'))
+  } finally {
+    saving.value = false
+  }
+}
+
+async function removeRecord(row: EvaluationRecord) {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除 ${row.category} #${row.id} 评估数据？`,
+      '删除确认',
+      { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' },
+    )
+    await deleteEvaluation(row.category, row.id)
+    ElMessage.success('删除成功')
+    if (rows.value.length === 1 && pagination.page > 1) pagination.page -= 1
+    await loadData()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(getAdminApiError(error, '删除失败'))
+  }
+}
+
+function selectImportFile(file: UploadFile) {
+  importFile.value = file.raw || null
+}
+
+async function uploadImport() {
+  if (!importFile.value) {
+    ElMessage.warning('请选择 JSON 文件')
     return
   }
-  
-  ecmwfLoading.value = true
+  importing.value = true
   try {
-    // todo：调用 ECMWF 获取接口
-    const res = await api.fetchECMWF({
-      year: ecmwfParams.year,
-      month: ecmwfParams.month,
-      model: ecmwfParams.model,
-    })
-    
-    // 【转换逻辑】将 ECMWF 返回的原始数据，转换为项目统一的 JSON 格式
-    // 队友返回的数据结构假设为: { raw: { forecasts: [...], metadata: {...} } }
-    const rawData = res.data.raw || res.data
-    
-    // 示例转换：提取 forecasts 数组并转为 JSON 字符串
-    // 实际转换逻辑需根据队友提供的接口文档调整
-    let convertedData = {}
-    if (Array.isArray(rawData.forecasts)) {
-      // 如果返回的是 forecasts 数组，提取并转为 JSON
-      convertedData = {
-        forecasts: rawData.forecasts,
-        metadata: rawData.metadata || {},
-        source: 'ECMWF',
-        fetchTime: new Date().toISOString(),
-      }
-    } else {
-      convertedData = rawData
-    }
-    
-    formData.data = JSON.stringify(convertedData, null, 2)
-    formData.year = ecmwfParams.year
-    formData.month = ecmwfParams.month
-    formData.varModel = ecmwfParams.model
-    
-    ElMessage.success('ECMWF 数据获取并转换成功！请检查后提交')
+    const result = await importEvaluationFile(activeCategory.value, importMode.value, importFile.value)
+    ElMessage.success(`导入完成：新增 ${result.inserted} 条，更新 ${result.updated} 条`)
+    importVisible.value = false
+    importFile.value = null
+    await loadData()
   } catch (error) {
-    ElMessage.error('获取 ECMWF 数据失败: ' + error.message)
+    ElMessage.error(getAdminApiError(error, '文件导入失败'))
+  } finally {
+    importing.value = false
+  }
+}
+
+function openEcmwf() {
+  // 先挂载独立弹窗，避免 Element Plus 在相邻 dialog 刚销毁时复用旧节点。
+  ecmwfVisible.value = true
+  ecmwf.category = activeCategory.value
+  ecmwf.year = activeCategory.value === 'NAO' ? 'all' : (filters.year || String(new Date().getFullYear()))
+  ecmwf.month = activeCategory.value === 'NAO' ? 'all' : (filters.month || String(new Date().getMonth() + 1))
+  ecmwf.day = filters.day || String(new Date().getDate())
+  ecmwf.varModel = ''
+  normalizeFields(ecmwf)
+  ecmwfPreview.value = null
+}
+
+async function previewEcmwf() {
+  if (!ecmwf.param.trim()) {
+    ElMessage.warning('请填写 ECMWF 参数短名')
+    return
+  }
+  ecmwfLoading.value = true
+  ecmwfPreview.value = null
+  try {
+    ecmwfPreview.value = await fetchEcmwfPreview({
+      category: ecmwf.category,
+      year: ecmwf.year,
+      month: hasField(ecmwf.category, 'month') ? ecmwf.month : undefined,
+      day: hasField(ecmwf.category, 'day') ? ecmwf.day : undefined,
+      varModel: hasField(ecmwf.category, 'varModel') ? ecmwf.varModel : undefined,
+      date: ecmwf.date || undefined,
+      time: ecmwf.time,
+      step: ecmwf.step,
+      param: ecmwf.param.trim(),
+      levtype: ecmwf.levtype || undefined,
+      levelist: ecmwf.levelist,
+      model: ecmwf.model,
+      provider: ecmwf.provider,
+      forecastType: ecmwf.forecastType,
+      reducer: ecmwf.reducer,
+      maxPoints: ecmwf.maxPoints,
+    })
+    ElMessage.success('ECMWF 真实数据获取与转换成功')
+  } catch (error) {
+    ElMessage.error(getAdminApiError(error, 'ECMWF 获取失败'))
   } finally {
     ecmwfLoading.value = false
   }
 }
 
-// 提交数据（新增/更新）
-const handleSubmit = async () => {
-  // 简单校验
-  if (!formData.year || !formData.month || !formData.varModel || !formData.data) {
-    ElMessage.warning('请完整填写所有字段')
-    return
-  }
-  
-  // 校验 data 合法
+async function publishEcmwf() {
+  if (!ecmwfPreview.value) return
+  ecmwfImporting.value = true
   try {
-    JSON.parse(formData.data)
-  } catch {
-    ElMessage.error('"评估数据" 字段必须是有效的 JSON 格式')
-    return
-  }
-  
-  loading.value = true
-  try {
-    const submitData = {
-      year: formData.year,
-      month: formData.month,
-      varModel: formData.varModel,
-      category: formData.category,
-      data: formData.data,
-    }
-    
-    let res
-    if (isEdit.value) {
-      // 更新
-      res = await api.update({ ...submitData, id: formData.id })
-      ElMessage.success('更新成功')
-    } else {
-      // 新增
-      res = await api.add(submitData)
-      ElMessage.success('新增成功')
-    }
-    
-    dialogVisible.value = false
-    loadData() // 刷新列表
+    const result = await importEcmwfBatch(ecmwf.category, 'UPSERT', [ecmwfPreview.value.record])
+    ElMessage.success(`ECMWF 入库完成：新增 ${result.inserted} 条，更新 ${result.updated} 条`)
+    ecmwfVisible.value = false
+    activeCategory.value = ecmwf.category
+    await loadData()
   } catch (error) {
-    ElMessage.error('提交失败: ' + error.message)
+    ElMessage.error(getAdminApiError(error, 'ECMWF 入库失败'))
   } finally {
-    loading.value = false
+    ecmwfImporting.value = false
   }
 }
 
-// 删除数据
-const deleteDialogVisible = ref(false)
-const deleteRow = ref(null)
-const deleteLoading = ref(false)
-
-const handleDelete = (row) => {
-  deleteRow.value = row
-  deleteDialogVisible.value = true
+function formatData(value: unknown) {
+  const json = JSON.stringify(value)
+  return json.length > 100 ? `${json.slice(0, 100)}…` : json
 }
 
-const confirmDelete = async () => {
-  if (!deleteRow.value) return
-  deleteLoading.value = true
-  try {
-    await api.delete(deleteRow.value.id)
-    ElMessage.success('删除成功')
-    deleteDialogVisible.value = false
-    deleteRow.value = null
-    loadData()
-  } catch (error) {
-    ElMessage.error('删除失败: ' + error.message)
-  } finally {
-    deleteLoading.value = false
-  }
+function logout() {
+  clearAdminSession()
+  router.replace({ name: 'AdminLogin' })
 }
 
-// 格式化
-const formatJson = (str) => {
-  try {
-    return JSON.stringify(JSON.parse(str), null, 2)
-  } catch {
-    return str
-  }
-}
-
-// 加载时查询
-onMounted(() => {
+watch(activeCategory, () => {
+  Object.assign(filters, { year: '', month: '', day: '', varModel: '' })
+  pagination.page = 1
   loadData()
 })
 
-// 暴露 loadData 方法给父组件使用
-defineExpose({ loadData })
+watch(() => form.category, () => normalizeFields(form))
+watch(() => form.year, () => normalizeFields(form))
+watch(() => ecmwf.category, () => { ecmwfPreview.value = null; normalizeFields(ecmwf) })
+watch(() => ecmwf.year, () => { ecmwfPreview.value = null; normalizeFields(ecmwf) })
+
+onMounted(async () => {
+  try {
+    metadata.value = await getEvaluationMetadata()
+    normalizeFields(form)
+    await loadData()
+  } catch (error) {
+    ElMessage.error(getAdminApiError(error, '加载管理端元数据失败'))
+  }
+})
 </script>
 
 <template>
-  <div class="examination-manage">
-    <!-- 页面标题 -->
-    <div class="page-header">
-      <h2>预报评估数据管理</h2>
-      <p>管理 ENSO / NAO / 海冰 等板块的预报评估数据</p>
-    </div>
+  <main class="admin-page">
+    <header class="admin-header">
+      <div>
+        <p class="eyebrow">天行平台·管理端</p>
+        <h1>预报评估数据管理</h1>
+        <p>功能 2.7–2.9：更新、删除和发布评估数据</p>
+      </div>
+      <div class="header-actions">
+        <el-button :icon="Back" @click="router.push({ name: 'home' })">公开站点</el-button>
+        <el-button :icon="SwitchButton" @click="logout">退出登录</el-button>
+      </div>
+    </header>
 
-    <!-- 搜索区域 -->
-    <div class="search-area">
-      <el-form :inline="true" :model="searchForm">
-        <el-form-item label="年份">
-          <el-input v-model="searchForm.year" placeholder="如: 2023" style="width: 150px" clearable />
-        </el-form-item>
-        <el-form-item label="月份">
-          <el-input v-model="searchForm.month" placeholder="如: 01" style="width: 120px" clearable />
-        </el-form-item>
-        <el-form-item label="板块">
-          <el-select v-model="searchForm.category" placeholder="全部" style="width: 140px" clearable>
-            <el-option label="ENSO" value="ENSO" />
-            <el-option label="NAO" value="NAO" />
-            <el-option label="海冰" value="SeaIce" />
+    <section class="panel category-panel">
+      <el-tabs v-model="activeCategory" class="category-tabs">
+        <el-tab-pane v-for="category in categories" :key="category" :label="category" :name="category" />
+      </el-tabs>
+      <p>{{ categoryDescriptions[activeCategory] }}</p>
+      <small v-if="currentMetadata">自然键：{{ currentMetadata.naturalKey }}</small>
+    </section>
+
+    <section class="panel toolbar">
+      <div class="filters">
+        <el-input v-if="activeCategory !== 'NAO'" v-model="filters.year" placeholder="年份" clearable />
+        <el-input v-if="hasField(activeCategory, 'month') && activeCategory !== 'NAO'" v-model="filters.month" placeholder="月份" clearable />
+        <el-input v-if="hasField(activeCategory, 'day')" v-model="filters.day" placeholder="日" clearable />
+        <el-select v-if="hasField(activeCategory, 'varModel')" v-model="filters.varModel" placeholder="全部指标" clearable filterable>
+          <el-option v-for="model in varModels(activeCategory, filters.year)" :key="model" :label="model" :value="model" />
+        </el-select>
+        <el-button type="primary" :icon="Refresh" @click="pagination.page = 1; loadData()">查询</el-button>
+        <el-button @click="resetFilters">重置</el-button>
+      </div>
+      <div class="operations">
+        <el-button :icon="Upload" @click="importVisible = true">导入 JSON</el-button>
+        <el-button type="success" plain :icon="Connection" @click="openEcmwf">ECMWF 获取</el-button>
+        <el-button type="primary" :icon="Plus" @click="openCreate">发布数据</el-button>
+      </div>
+    </section>
+
+    <section class="panel table-panel">
+      <el-table :data="rows" v-loading="loading" row-key="id" stripe>
+        <el-table-column prop="id" label="ID" width="80" />
+        <el-table-column prop="category" label="类别" width="90">
+          <template #default="{ row }"><el-tag>{{ row.category }}</el-tag></template>
+        </el-table-column>
+        <el-table-column prop="year" label="年份" width="100" />
+        <el-table-column v-if="hasField(activeCategory, 'month')" prop="month" label="月份" width="90" />
+        <el-table-column v-if="hasField(activeCategory, 'day')" prop="day" label="日" width="80" />
+        <el-table-column v-if="hasField(activeCategory, 'varModel')" prop="varModel" label="评估指标" min-width="220" />
+        <el-table-column label="数据预览" min-width="260">
+          <template #default="{ row }"><code>{{ formatData(row.data) }}</code></template>
+        </el-table-column>
+        <el-table-column label="操作" width="170" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" :icon="Edit" @click="openEdit(row)">更新</el-button>
+            <el-button link type="danger" :icon="Delete" @click="removeRecord(row)">删除</el-button>
+          </template>
+        </el-table-column>
+        <template #empty><el-empty description="暂无评估数据" /></template>
+      </el-table>
+      <el-pagination
+        v-model:current-page="pagination.page"
+        v-model:page-size="pagination.pageSize"
+        :total="total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next"
+        @current-change="loadData"
+        @size-change="pagination.page = 1; loadData()"
+      />
+    </section>
+
+    <el-dialog v-model="editorVisible" :title="editing ? '更新评估数据（2.7）' : '发布评估数据（2.9）'" width="680px">
+      <el-form label-position="top">
+        <el-form-item label="评估类别">
+          <el-select v-model="form.category" :disabled="editing">
+            <el-option v-for="category in categories" :key="category" :label="category" :value="category" />
           </el-select>
         </el-form-item>
-        <el-form-item>
-          <div style="display: flex; align-items: center;">
-            <el-button 
-              type="primary" 
-              link 
-              size="small" 
-              style="margin-left: -40px; margin-top: -7px; font-size: 14px; padding: 0 40px;" 
-              @click="loadData" 
-              :icon="Refresh"
-            >
-              查询
-            </el-button>
-            <el-button 
-              link 
-              size="small" 
-              style="margin-left: 10px; margin-top: -7px; font-size: 14px; padding: 0 40px;" 
-              @click="resetSearch"
-            >
-              重置
-            </el-button>
-            <el-button 
-              type="success" 
-              link 
-              size="small" 
-              @click="handleAdd" 
-              style="margin-left: 80px; margin-top: -7px; font-size: 14px; padding: 0 40px;" 
-              :icon="Plus"
-            >
-              新增数据
-            </el-button>
-          </div>
+        <div class="form-grid">
+          <el-form-item label="年份">
+            <el-input v-model="form.year" :disabled="form.category === 'NAO'" placeholder="如 2026" />
+          </el-form-item>
+          <el-form-item v-if="hasField(form.category, 'month')" label="月份">
+            <el-input v-model="form.month" :disabled="form.category === 'NAO'" placeholder="1–12" />
+          </el-form-item>
+          <el-form-item v-if="hasField(form.category, 'day')" label="日">
+            <el-input v-model="form.day" placeholder="1–31" />
+          </el-form-item>
+          <el-form-item v-if="hasField(form.category, 'varModel')" label="评估指标">
+            <el-select v-model="form.varModel" filterable>
+              <el-option v-for="model in varModels(form.category, form.year)" :key="model" :label="model" :value="model" :disabled="model.includes('{year}')" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="评估数据（非空 JSON 数组）">
+          <el-input v-model="form.data" type="textarea" :rows="10" placeholder="[0.12, 0.18, 0.21]" />
         </el-form-item>
+        <el-alert v-if="editorMetadata" :closable="false" type="info" show-icon :title="`数据表：${editorMetadata.table}；自然键：${editorMetadata.naturalKey}`" />
       </el-form>
-    </div>
+      <template #footer>
+        <el-button @click="editorVisible = false">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="saveRecord">{{ editing ? '保存更新' : '确认发布' }}</el-button>
+      </template>
+    </el-dialog>
 
-    <!-- 数据表格 -->
-    <el-table :data="tableData" border v-loading="loading" style="width: 100%">
-      <el-table-column prop="id" label="ID" width="80" align="center" />
-      <el-table-column prop="year" label="年份" width="120" align="center" />
-      <el-table-column prop="month" label="月份" width="100" align="center" />
-      <el-table-column prop="varModel" label="模型/变量" min-width="150" align="center" />
-      <el-table-column prop="category" label="板块" width="120" align="center">
-        <template #default="{ row }">
-          <el-tag :type="row.category === 'ENSO' ? 'success' : row.category === 'NAO' ? 'warning' : 'info'">
-            {{ row.category }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="data" label="评估数据 (JSON)" min-width="200">
-        <template #default="{ row }">
-          <el-popover placement="top-start" :width="400" trigger="hover">
-            <template #reference>
-              <el-text truncated style="max-width: 180px; display: inline-block">
-                {{ formatJson(row.data) }}
-              </el-text>
-            </template>
-            <pre style="max-height: 300px; overflow: visible; font-size: 12px; white-space: pre-wrap; word-break: break-all">
-              {{ formatJson(row.data) }}
-            </pre>
-          </el-popover>
-        </template>
-      </el-table-column>
-      <el-table-column label="操作" min-width="240" align="center" fixed="right">
-        <template #default="{ row }">
-          <div style="display: flex; justify-content: center; align-items: center;">
-            <el-button 
-              type="primary" 
-              link 
-              size="small"
-              style="font-size: 14px; margin-right: 100px; margin-top: 15px; padding: 0 40px;" 
-              @click="handleEdit(row)"
-            >
-              编辑
-            </el-button>
-            <el-button 
-              type="danger" 
-              link 
-              size="small"
-              style="font-size: 14px; margin-left: 100px; margin-top: 15px; padding: 0 40px;" 
-              @click="handleDelete(row)"
-            >
-              删除
-            </el-button>
-          </div>
-        </template>
-      </el-table-column>
-    </el-table>
-
-    <!-- 分页 -->
-    <div class="pagination-area">
-      <el-pagination
-        background
-        layout="total, prev, pager, next"
-        :total="total"
-        :page-size="10"
-        @current-change="loadData"
-      />
-    </div>
-
-    <!-- 新增/编辑弹窗 -->
-    <el-dialog v-model="dialogVisible" :title="dialogTitle" width="700px" destroy-on-close>
-      <el-form :model="formData" label-width="100px">
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="年份" required>
-              <el-input v-model="formData.year" placeholder="如: 2024" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="月份" required>
-              <el-input v-model="formData.month" placeholder="如: 01" />
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <el-row :gutter="20">
-          <el-col :span="12">
-            <el-form-item label="模型名称" required>
-              <el-input v-model="formData.varModel" placeholder="如: ENS_3.4" />
-            </el-form-item>
-          </el-col>
-          <el-col :span="12">
-            <el-form-item label="板块" required>
-              <el-select v-model="formData.category" style="width: 100%">
-                <el-option label="ENSO" value="ENSO" />
-                <el-option label="NAO" value="NAO" />
-                <el-option label="海冰" value="SeaIce" />
-              </el-select>
-            </el-form-item>
-          </el-col>
-        </el-row>
-
-        <!-- 数据来源切换 -->
-        <el-form-item label="数据来源" v-if="!isEdit">
-          <el-radio-group v-model="dataSource">
-            <el-radio-button value="manual">手动输入</el-radio-button>
-            <el-radio-button value="ecmwf">从 ECMWF 获取</el-radio-button>
+    <el-dialog v-model="importVisible" :title="`${activeCategory} JSON 文件导入`" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="重复数据策略">
+          <el-radio-group v-model="importMode">
+            <el-radio-button value="REJECT">REJECT：有重复则整批拒绝</el-radio-button>
+            <el-radio-button value="UPSERT">UPSERT：覆盖已有记录</el-radio-button>
           </el-radio-group>
         </el-form-item>
-
-        <!-- 手动输入模式 -->
-        <el-form-item label="评估数据" required v-if="dataSource === 'manual'">
-          <el-input
-            v-model="formData.data"
-            type="textarea"
-            :rows="6"
-            placeholder='请输入 JSON 格式的评估数据，如: {"rmse": 0.32, "corr": 0.87}'
-          />
-          <el-text size="small" type="info">必须是有效的 JSON 格式</el-text>
+        <el-form-item label="JSON 文件">
+          <el-upload accept="application/json,.json" :auto-upload="false" :limit="1" :on-change="selectImportFile">
+            <el-button :icon="Upload">选择文件</el-button>
+          </el-upload>
         </el-form-item>
+        <el-alert :closable="false" type="info" title="文件需包含 category 和 records 数组，且 category 必须与当前页签一致。" />
+      </el-form>
+      <template #footer>
+        <el-button @click="importVisible = false">取消</el-button>
+        <el-button type="primary" :loading="importing" @click="uploadImport">开始导入</el-button>
+      </template>
+    </el-dialog>
 
-        <!-- ECMWF 获取模式 -->
-        <template v-if="dataSource === 'ecmwf'">
-          <el-divider content-position="left">ECMWF 数据获取</el-divider>
-          <el-row :gutter="20">
-            <el-col :span="8">
-              <el-form-item label="年份">
-                <el-input v-model="ecmwfParams.year" placeholder="2024" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="月份">
-                <el-input v-model="ecmwfParams.month" placeholder="01" />
-              </el-form-item>
-            </el-col>
-            <el-col :span="8">
-              <el-form-item label="模型">
-                <el-select v-model="ecmwfParams.model" style="width: 100%">
-                  <el-option label="ENS" value="ENS" />
-                  <el-option label="AIFS" value="AIFS" />
-                </el-select>
-              </el-form-item>
-            </el-col>
-          </el-row>
-          <el-form-item>
-            <div style="display: flex; align-items: center;">
-              <el-button 
-                type="primary" 
-                link 
-                size="small" 
-                style="font-size: 14px; margin-top: -5px; margin-left: -80px; padding: 0 120px;"  
-                @click="handleFetchECMWF" 
-                :loading="ecmwfLoading"
-                :icon="Download"
-              >
-                获取并转换 ECMWF 数据
-              </el-button>
-              <el-text size="small" type="info" style=" margin-left: -20px; margin-top: 10px">
-                点击后自动将 ECMWF 数据转换为标准格式并填入上方
-              </el-text>
-            </div>
+    <el-dialog
+      v-if="ecmwfVisible"
+      key="ecmwf-dialog"
+      v-model="ecmwfVisible"
+      title="ECMWF Open Data 真实获取"
+      width="820px"
+      destroy-on-close
+    >
+      <el-alert
+        type="warning"
+        :closable="false"
+        show-icon
+        title="Open Data 仅保留最近约 2–3 天的实时预报。此功能将 GRIB 字段按选定规则转成数组；用于科研评分时仍需上游校验计算。"
+      />
+      <el-form class="ecmwf-form" label-position="top">
+        <div class="form-grid three">
+          <el-form-item label="入库类别">
+            <el-select v-model="ecmwf.category"><el-option v-for="category in categories" :key="category" :label="category" :value="category" /></el-select>
           </el-form-item>
-          <el-form-item label="转换后数据" v-if="formData.data">
-            <el-input
-              v-model="formData.data"
-              type="textarea"
-              :rows="4"
-              readonly
-            />
+          <el-form-item label="年份"><el-input v-model="ecmwf.year" :disabled="ecmwf.category === 'NAO'" /></el-form-item>
+          <el-form-item v-if="hasField(ecmwf.category, 'month')" label="月份"><el-input v-model="ecmwf.month" :disabled="ecmwf.category === 'NAO'" /></el-form-item>
+          <el-form-item v-if="hasField(ecmwf.category, 'day')" label="日"><el-input v-model="ecmwf.day" /></el-form-item>
+          <el-form-item v-if="hasField(ecmwf.category, 'varModel')" label="评估指标">
+            <el-select v-model="ecmwf.varModel" filterable><el-option v-for="model in varModels(ecmwf.category, ecmwf.year)" :key="model" :label="model" :value="model" :disabled="model.includes('{year}')" /></el-select>
           </el-form-item>
+          <el-form-item label="ECMWF 参数"><el-input v-model="ecmwf.param" placeholder="2t / msl / t / u / v" /></el-form-item>
+          <el-form-item label="起报日期（留空=最新）"><el-input v-model="ecmwf.date" placeholder="YYYY-MM-DD" /></el-form-item>
+          <el-form-item label="起报时次 UTC"><el-select v-model="ecmwf.time"><el-option v-for="time in [0, 6, 12, 18]" :key="time" :label="`${time}:00`" :value="time" /></el-select></el-form-item>
+          <el-form-item label="预报时效（小时）"><el-input-number v-model="ecmwf.step" :min="0" :max="360" /></el-form-item>
+          <el-form-item label="模型"><el-select v-model="ecmwf.model"><el-option label="IFS" value="ifs" /><el-option label="AIFS Single" value="aifs-single" /><el-option label="AIFS ENS" value="aifs-ens" /></el-select></el-form-item>
+          <el-form-item label="数据源"><el-select v-model="ecmwf.provider"><el-option label="ECMWF" value="ecmwf" /><el-option label="AWS" value="aws" /><el-option label="Google" value="google" /><el-option label="Azure" value="azure" /></el-select></el-form-item>
+          <el-form-item label="层类型"><el-input v-model="ecmwf.levtype" placeholder="sfc / pl" /></el-form-item>
+          <el-form-item label="压力层（可选）"><el-input-number v-model="ecmwf.levelist" :min="1" :max="1000" /></el-form-item>
+          <el-form-item label="转换规则"><el-select v-model="ecmwf.reducer"><el-option label="空间平均（单值）" value="MEAN" /><el-option label="逐行平均" value="ROW_MEAN" /><el-option label="均匀抽样" value="SAMPLE" /></el-select></el-form-item>
+          <el-form-item v-if="ecmwf.reducer === 'SAMPLE'" label="最大采样点"><el-input-number v-model="ecmwf.maxPoints" :min="1" :max="5000" /></el-form-item>
+        </div>
+        <el-button type="primary" plain :icon="Connection" :loading="ecmwfLoading" @click="previewEcmwf">获取并生成预览</el-button>
+        <template v-if="ecmwfPreview">
+          <el-divider content-position="left">真实数据预览</el-divider>
+          <el-input :model-value="JSON.stringify(ecmwfPreview.record.data, null, 2)" type="textarea" :rows="7" readonly />
+          <p class="metadata-line">
+            实际源：{{ ecmwfSummary.provider }} · 起报：{{ ecmwfSummary.forecastDatetime }} ·
+            字段：{{ ecmwfSummary.field }}（{{ ecmwfSummary.units }}）· 网格点：{{ ecmwfSummary.totalGridPoints }} ·
+            转换结果长度：{{ Array.isArray(ecmwfPreview.record.data) ? ecmwfPreview.record.data.length : 0 }}
+          </p>
         </template>
       </el-form>
-
-      <!-- 弹窗底部按钮，我服了，为什么#footer标签没有用 -->
-      <template #footer v-if="dataSource === 'ecmwf'">
-        <div style="display: flex; justify-content: flex-end; align-items: center;">
-          <el-button 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-left: 20px; margin-top: 320px;" 
-            @click="dialogVisible = false"
-          >
-            取消
-          </el-button>
-          <el-button 
-            type="primary" 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-right: 40px; margin-top: 320px;" 
-            @click="handleSubmit" 
-            :loading="loading"
-            :disabled="dataSource === 'ecmwf' && !formData.data"
-          >
-            {{ isEdit ? '更新' : '提交' }}
-          </el-button>
-        </div>
-      </template>
-
-      <template v-if="dataSource === 'manual' && !isEdit" >
-        <div style="display: flex; justify-content: flex-end; align-items: center;">
-          <el-button 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-left: 20px; margin-top: 360px;" 
-            @click="dialogVisible = false"
-          >
-            取消
-          </el-button>
-          <el-button 
-            type="primary" 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-right: 40px; margin-top: 360px;" 
-            @click="handleSubmit" 
-            :loading="loading"
-            :disabled="dataSource === 'ecmwf' && !formData.data"
-          >
-            {{ isEdit ? '更新' : '提交' }}
-          </el-button>
-        </div>
-      </template>
-
-      <template v-if="dataSource === 'manual' && isEdit" >
-        <div style="display: flex; justify-content: flex-end; align-items: center;">
-          <el-button 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-left: 20px; margin-top: 320px;" 
-            @click="dialogVisible = false"
-          >
-            取消
-          </el-button>
-          <el-button 
-            type="primary" 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-right: 40px; margin-top: 320px;" 
-            @click="handleSubmit" 
-            :loading="loading"
-            :disabled="dataSource === 'ecmwf' && !formData.data"
-          >
-            {{ isEdit ? '更新' : '提交' }}
-          </el-button>
-        </div>
-      </template>
-    </el-dialog>
-    <!-- 自定义删除确认弹窗 -->
-    <el-dialog 
-      v-model="deleteDialogVisible" 
-      title="请确认删除" 
-      width="420px" 
-      destroy-on-close
-      >
-      <div style="padding: 10px 0;">
-        <p style="font-size: 16px; color: #606266;">
-          确定要删除 {{ deleteRow?.year }}年{{ deleteRow?.month }}月的 "{{ deleteRow?.varModel }}" 评估数据吗？
-        </p>
-      <el-text type="warning" size="small">此操作不可撤销，请谨慎操作</el-text>
-      </div>
       <template #footer>
-        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 16px;">
-          <el-button 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-top: 130px;" 
-            @click="deleteDialogVisible = false"
-          >
-          取消
-          </el-button>
-          <el-button 
-            type="danger" 
-            link 
-            size="small" 
-            style="font-size: 14px; margin-right: 40px; margin-top: 130px;" 
-            @click="confirmDelete"
-            :loading="deleteLoading"
-          >
-          删除
-          </el-button>
-        </div>
+        <el-button @click="ecmwfVisible = false">取消</el-button>
+        <el-button type="success" :disabled="!ecmwfPreview" :loading="ecmwfImporting" @click="publishEcmwf">以 UPSERT 方式入库</el-button>
       </template>
     </el-dialog>
-  </div>
+  </main>
 </template>
 
-<style>
-/* 删除确认框宽度和按钮样式 */
-.delete-confirm-box {
-  width: 480px !important;
-  height: 120px !important;
-}
-
-.delete-confirm-box .el-message-box__btns {
-  display: flex !important;
-  flex-wrap: nowrap !important;       
-}
-
-.delete-confirm-box .el-message-box__btns .el-button {
-  background: transparent !important;
-  border: none !important;
-  font-size: 14px !important;
-  margin-top: 30px !important;
-  padding: 0 80px !important;
-  color: #409eff !important;
-  flex-shrink: 0 !important;
-}
-.delete-confirm-box .el-message-box__btns .el-button--default {
-  color: #909399 !important;
-}
-.delete-confirm-box .el-message-box__btns .el-button--default:hover {
-  color: #606266 !important;
-}
-.delete-confirm-box .el-message-box__btns .el-button--primary {
-  color: #409eff !important;
-}
-.delete-confirm-box .el-message-box__btns .el-button--primary:hover {
-  color: #66b1ff !important;
-}
-</style>
-
 <style scoped lang="scss">
-.examination-manage {
-  padding: 20px 30px;
-  background-color: #f5f7fa;
-  min-height: 100vh;
-
-  .page-header {
-    margin-bottom: 24px;
-
-    h2 {
-      font-size: 24px;
-      font-weight: 600;
-      color: #303133;
-      margin: 0 0 4px 0;
-    }
-
-    p {
-      color: #909399;
-      font-size: 14px;
-      margin: 0;
-    }
-  }
-
-  .search-area {
-    background-color: #fff;
-    padding: 20px 24px;
-    border-radius: 8px;
-    margin-bottom: 16px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-
-    :deep(.el-form) {
-      display: flex;
-      flex-wrap: wrap;
-      align-items: center;
-      gap: 4px 0;
-    }
-
-    :deep(.el-form-item) {
-      margin-bottom: 0;
-    }
-  }
-
-  .pagination-area {
-    margin-top: 16px;
-    display: flex;
-    justify-content: flex-end;
-    background-color: #fff;
-    padding: 16px 24px;
-    border-radius: 8px;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-  }
-}
-
-:deep(.el-table) {
-  background-color: #fff;
-  border-radius: 8px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
-}
-
-:deep(.el-dialog) {
-  border-radius: 12px;
-}
-
-:deep(.el-divider) {
-  margin: 16px 0;
+.admin-page { min-height: 100vh; padding: 28px; background: #eef3f8; color: #16324a; }
+.admin-header { max-width: 1500px; margin: 0 auto 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.admin-header h1 { margin: 3px 0 8px; font-size: 30px; }
+.admin-header p { margin: 0; color: #657b8d; }
+.eyebrow { color: #1460a8 !important; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+.header-actions, .operations, .filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.panel { max-width: 1500px; margin: 0 auto 16px; padding: 20px 24px; background: white; border: 1px solid #dde7ef; border-radius: 14px; box-shadow: 0 8px 28px rgba(25, 62, 89, .06); }
+.category-panel { padding-bottom: 16px; }
+.category-panel p { margin: 2px 0 6px; color: #36576f; }
+.category-panel small { color: #8396a5; }
+.category-tabs :deep(.el-tabs__header) { margin-bottom: 10px; }
+.toolbar { display: flex; justify-content: space-between; gap: 18px; }
+.filters :deep(.el-input), .filters :deep(.el-select) { width: 145px; }
+.table-panel { overflow: hidden; }
+.table-panel :deep(.el-pagination) { justify-content: flex-end; margin-top: 20px; }
+code { color: #34536a; font-family: Consolas, monospace; white-space: normal; overflow-wrap: anywhere; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
+.form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.form-grid :deep(.el-select), .form-grid :deep(.el-input-number) { width: 100%; }
+.ecmwf-form { margin-top: 20px; }
+.metadata-line { color: #657b8d; font-size: 13px; }
+@media (max-width: 900px) {
+  .admin-page { padding: 16px; }
+  .admin-header, .toolbar { align-items: flex-start; flex-direction: column; }
+  .form-grid, .form-grid.three { grid-template-columns: 1fr; }
+  .filters :deep(.el-input), .filters :deep(.el-select) { width: 100%; }
 }
 </style>
