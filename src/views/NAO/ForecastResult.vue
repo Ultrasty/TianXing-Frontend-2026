@@ -5,9 +5,9 @@ import axios from 'axios';
 import request from '@/utils/request';//引入请求方法byCP
 import VChart from 'vue-echarts';
 import { nextTick } from "vue";
-import { configProviderContextKey } from "element-plus";
+import { ElMessage, ElMessageBox } from 'element-plus';
 
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
+import { ArrowLeft, ArrowRight, Delete } from '@element-plus/icons-vue';
 import bannerImg from '@/assets/nao.jpg';//首页图
 
 const selectedNAOI = ref(true)
@@ -197,8 +197,58 @@ function updateNAOIChartTitle() {
   NAOIChartTitle.value = year1 + '年' + month1 + '月~' + year2 + '年' + month2 + '月 NAO预测结果';
 }
 
+const naoForecastLabel = computed(() => {
+  if (selectedNAOI.value) {
+    return `${NAOISelectedYear.value}年${String(NAOISelectedMonth.value).padStart(2, '0')}月 NAO预测结果`;
+  }
+  return `${SLPSelectedYear.value}年${String(SLPSelectedMonth.value).padStart(2, '0')}月 北大西洋SLP预测结果`;
+});
+
 function updateSLPChartTitle() {
   SLPChartTitle.value = SLPSelectedYear.value + '年' + SLPSelectedMonth.value + '月 北大西洋SLP预测结果';
+}
+
+async function deleteForecastResult() {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除 ${naoForecastLabel.value} 吗？删除后将无法恢复。`,
+      '删除预报结果图',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        draggable: true,
+      }
+    );
+
+    const payload = selectedNAOI.value
+      ? {
+          year: String(NAOISelectedYear.value),
+          month: String(NAOISelectedMonth.value),
+          day: null,
+          type: 'NAO',
+        }
+      : {
+          year: String(SLPSelectedYear.value),
+          month: String(SLPSelectedMonth.value),
+          day: null,
+          type: 'NAO',
+        };
+
+    const { data } = await axios.post('/admin/forecast-result-images/delete', payload);
+    ElMessage.success(data?.message || '预报结果图删除成功');
+
+    if (selectedNAOI.value) {
+      await updateNAOIChart();
+    } else {
+      await updateSLPChart();
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除预报结果图失败', error);
+      ElMessage.error(error?.response?.data?.message || '删除预报结果图失败');
+    }
+  }
 }
 
 function NAOIDisabledYear(day) {
@@ -319,6 +369,12 @@ onMounted(
           :clearable="false" :disabled-date="SLPDisabledYear" />
       </div>
 
+      <div class="result-actions" v-if="chartSelected === 0 || chartSelected === 1">
+        <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
+          删除预报结果图
+        </el-button>
+      </div>
+
       <div class="text-container" v-if="chartSelected === 0">
         <div class="description">
           {{ NAOIDescription }}
@@ -392,7 +448,17 @@ onMounted(
   display: flex;
   justify-content: flex-end;
   position: relative;
-  padding: 50px 0 30px;
+  padding: 50px 0 18px;
+}
+
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.delete-btn {
+  box-shadow: 0px 8px 18px rgba(220, 38, 38, 0.12);
 }
 
 .text {

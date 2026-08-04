@@ -3,7 +3,8 @@ import { ref, onMounted, computed, watch } from "vue";
 import axios from 'axios';
 //import request from '@/utils/request';//项目已提供 src/utils/request.ts 工具，它会自动应用环境变量中的API前缀。byCP
 import VChart from 'vue-echarts';
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
+import { ElMessage, ElMessageBox } from 'element-plus';
+import { ArrowLeft, ArrowRight, Delete } from '@element-plus/icons-vue';
 import bannerImg from '@/assets/Ice.jpg';
 
 const selectedSIE = ref(true);
@@ -538,8 +539,58 @@ function updateSIEChartTitle() {
   SIEChartTitle.value = year1 + '年' + month1 + '月~' + year2 + '年' + month2 + '月 海冰预测结果';
 }
 
+const seaIceForecastLabel = computed(() => {
+  if (selectedSIE.value) {
+    return `${selectedYear.value}年${String(selectedMonth.value).padStart(2, '0')}月 海冰预测结果`;
+  }
+  return `${selectedDay.value.getFullYear()}年${selectedDay.value.getMonth() + 1}月${selectedDay.value.getDate()}日 海冰SIC预测结果`;
+});
+
 function updateSICChartTitle() {
   SICChartTitle.value = selectedDay.value.getFullYear() + '年' + (selectedDay.value.getMonth() + 1) + '月' + selectedDay.value.getDate() + '日 海冰SIC预测结果';
+}
+
+async function deleteForecastResult() {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除 ${seaIceForecastLabel.value} 吗？删除后将无法恢复。`,
+      '删除预报结果图',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        draggable: true,
+      }
+    );
+
+    const payload = selectedSIE.value
+      ? {
+          year: String(selectedYear.value),
+          month: String(selectedMonth.value),
+          day: null,
+          type: 'SIC',
+        }
+      : {
+          year: String(selectedDay.value.getFullYear()),
+          month: String(selectedDay.value.getMonth() + 1),
+          day: String(selectedDay.value.getDate()),
+          type: 'SIC',
+        };
+
+    const { data } = await axios.post('/admin/forecast-result-images/delete', payload);
+    ElMessage.success(data?.message || '预报结果图删除成功');
+
+    if (selectedSIE.value) {
+      await updateSIEChart();
+    } else {
+      await updateSICChart();
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除预报结果图失败', error);
+      ElMessage.error(error?.response?.data?.message || '删除预报结果图失败');
+    }
+  }
 }
 
 function disabledMonth(day) {
@@ -627,6 +678,12 @@ onMounted(() => {
           :disabled-date="disabledMonth" v-if="selectedSIE" />
         <el-date-picker @change="updateSICChart" v-model="selectedTime" :clearable="false" :disabled-date="disabledDate"
           v-if="selectedSIC" />
+      </div>
+
+      <div class="result-actions" v-if="selectedSIE || selectedSIC">
+        <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
+          删除预报结果图
+        </el-button>
       </div>
 
       <div class="text-container" v-if="selectedSIE">
@@ -813,8 +870,18 @@ ul.menu li.chart-name-selected:hover p {
   display: flex;
   justify-content: flex-end;
   position: relative;
-  padding: 50px 0 30px;
+  padding: 50px 0 18px;
   //margin-right: 5%; //new
+}
+
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.delete-btn {
+  box-shadow: 0px 8px 18px rgba(220, 38, 38, 0.12);
 }
 
 .SIEChartContainer {

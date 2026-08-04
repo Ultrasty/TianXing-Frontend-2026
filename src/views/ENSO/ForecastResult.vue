@@ -2,8 +2,9 @@
 import { ref, reactive, computed, defineExpose } from "vue";
 import * as echarts from "echarts";
 import axios from "axios";
+import { ElMessage, ElMessageBox } from 'element-plus';
 import VChart from 'vue-echarts';
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
+import { ArrowLeft, ArrowRight, Delete } from '@element-plus/icons-vue';
 import bannerImg from '@/assets/enso1.jpg';
 
 const prefix = "https://tianxing.tongji.edu.cn";
@@ -68,6 +69,7 @@ function handleClick(chartName, index) {
 const currentDate = ref(new Date(2025, 0));   // 初始日期
 const start_year = computed(() => currentDate.value.getFullYear());
 const start_month = computed(() => currentDate.value.getMonth() + 1);
+const forecastPeriodLabel = computed(() => `${start_year.value}年${String(start_month.value).padStart(2, '0')}月`);
 
 const chart1 = ref({});
 const chart1Title = ref('**年*月~**年*月Niño3.4指数结果预测');
@@ -114,6 +116,37 @@ function update_charts() {
       title_of_heat_Array = res.data.titles;
       title_of_heat.value = title_of_heat_Array[0];
     });
+}
+
+async function deleteForecastResult() {
+  try {
+    await ElMessageBox.confirm(
+      `确认删除 ${forecastPeriodLabel.value} 的预报结果图吗？删除后将无法恢复。`,
+      '删除预报结果图',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        draggable: true,
+      }
+    );
+
+    const payload = {
+      year: String(start_year.value),
+      month: String(start_month.value),
+      day: null,
+      type: 'ENSO_ASC',
+    };
+
+    const { data } = await axios.post('/admin/forecast-result-images/delete', payload);
+    ElMessage.success(data?.message || '预报结果图删除成功');
+    await update_charts();
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除预报结果图失败', error);
+      ElMessage.error(error?.response?.data?.message || '删除预报结果图失败');
+    }
+  }
 }
 
 // ====================== 热力图左右切换 ======================
@@ -175,6 +208,12 @@ const movBoxStyle = computed(() => ({
           :disabledDate="limitedDateRange" />
       </div>
 
+      <div class="result-actions" v-if="chartSelected === 0">
+        <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
+          删除预报结果图
+        </el-button>
+      </div>
+
       <div class="text-container" v-if="chartSelected === 0">
         <p class="text_of_graph">{{ Chart1_Description.text }}</p>
       </div>
@@ -226,7 +265,17 @@ const movBoxStyle = computed(() => ({
   display: flex;
   justify-content: flex-end;
   position: relative;
-  padding: 50px 0 30px;
+  padding: 50px 0 18px;
+}
+
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.delete-btn {
+  box-shadow: 0px 8px 18px rgba(220, 38, 38, 0.12);
 }
 
 .text {
