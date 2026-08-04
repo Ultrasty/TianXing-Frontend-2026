@@ -88,4 +88,8 @@ export function importForecastFromEcmwf(payload: Record<string, unknown>) {
   return adminApi.post('/admin/forecast-data/ecmwf', payload)
 }
 
+export function importIndexFromNoaa(payload: Record<string, unknown>) {
+  return adminApi.post('/admin/forecast-data/noaa-index', payload)
+}
+
 export default adminApi

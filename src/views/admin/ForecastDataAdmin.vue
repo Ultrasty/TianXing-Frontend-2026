@@ -11,6 +11,7 @@ import {
   getForecastDataById,
   getForecastMeta,
   importForecastFromEcmwf,
+  importIndexFromNoaa,
   updateForecastData,
   uploadForecastData,
   type ForecastDataRecord,
@@ -339,6 +340,52 @@ async function submitEcmwf(overwrite: boolean = false) {
   }
 }
 
+const noaaLoading = ref(false)
+
+async function submitNoaaIndex(overwrite: boolean = false) {
+  const targetYear = query.year || new Date().getFullYear().toString()
+  const targetMonth = query.month || String(new Date().getMonth() + 1)
+  const targetVarModel = query.varModel || modelOptions.value[0] || ''
+
+  if (!targetVarModel) {
+    ElMessage.warning('请选择要拉取的 var_model')
+    return
+  }
+
+  noaaLoading.value = true
+  try {
+    await importIndexFromNoaa({
+      dataset: query.dataset,
+      year: targetYear,
+      month: targetMonth,
+      varModel: targetVarModel,
+      overwrite: overwrite || undefined,
+    })
+    ElMessage.success(overwrite ? 'NOAA Index 覆盖更新成功' : 'NOAA 官方 Index 自动获取成功')
+    await loadData()
+  } catch (error: any) {
+    const msg = errorMessage(error, 'NOAA 导入失败')
+    if (!overwrite && (error?.response?.status === 409 || msg.includes('已存在'))) {
+      noaaLoading.value = false
+      try {
+        await ElMessageBox.confirm(
+          `检测到 ${query.dataset} / ${targetYear}-${targetMonth} / ${targetVarModel} 已存在数据。确定要覆盖更新原记录吗？`,
+          '数据已存在',
+          { type: 'warning', confirmButtonText: '确定覆盖', cancelButtonText: '取消' }
+        )
+        await submitNoaaIndex(true)
+      } catch (confirmErr: any) {
+        if (confirmErr === 'cancel' || confirmErr === 'close') return
+        ElMessage.error(errorMessage(confirmErr, '覆盖更新失败'))
+      }
+    } else {
+      ElMessage.error(msg)
+    }
+  } finally {
+    noaaLoading.value = false
+  }
+}
+
 async function logout() {
   try {
     await adminLogout()
@@ -389,15 +436,8 @@ onMounted(async () => {
         <el-form-item label=" ">
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="openUpload">手动上传并发布</el-button>
-          <el-tooltip
-            :disabled="isEcmwfSupported"
-            content="此模型为外部 AI 算法预测指数，须使用【手动上传】；仅 grid_NAO_MCD 支持从 ECMWF 拉取气压网格"
-            placement="top"
-          >
-            <span>
-              <el-button type="success" :disabled="!isEcmwfSupported" @click="openEcmwf">从 ECMWF 获取并发布</el-button>
-            </span>
-          </el-tooltip>
+          <el-button v-if="isEcmwfSupported" type="success" @click="openEcmwf">从 ECMWF 获取并发布</el-button>
+          <el-button v-else type="warning" :loading="noaaLoading" @click="() => submitNoaaIndex()">从 NOAA 自动拉取 Index</el-button>
         </el-form-item>
       </el-form>
     </el-card>
