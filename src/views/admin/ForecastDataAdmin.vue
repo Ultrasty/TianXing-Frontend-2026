@@ -436,22 +436,17 @@ onMounted(async () => {
         <el-form-item label=" ">
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="openUpload">手动上传并发布</el-button>
-          <el-tooltip
-            v-if="isEcmwfSupported"
-            content="当前模型为二维气压网格，将自动从 ECMWF Open Data 抓取 3D 北大西洋气压场"
-            placement="top"
-          >
-            <span>
-              <el-button type="success" @click="openEcmwf">从 ECMWF 获取并发布</el-button>
-            </span>
-          </el-tooltip>
+          <template v-if="query.dataset === 'NAO'">
+            <el-button v-if="isEcmwfSupported" type="success" @click="openEcmwf">从 ECMWF 获取并发布</el-button>
+            <el-button v-else type="warning" :loading="noaaLoading" @click="() => submitNoaaIndex()">从 NOAA 自动拉取 Index</el-button>
+          </template>
           <el-tooltip
             v-else
-            content="当前模型为一维指数型，将自动连接 NOAA CPC 官方数据源实时拉取最新标准指数；如需自定义预测曲线可使用【手动上传】"
+            content="ENSO 及 SIE 数据集模型为外部 AI 算法预测产物，须使用【手动上传】"
             placement="top"
           >
             <span>
-              <el-button type="warning" :loading="noaaLoading" @click="() => submitNoaaIndex()">从 NOAA 自动拉取 Index</el-button>
+              <el-button disabled type="info">在线获取受限</el-button>
             </span>
           </el-tooltip>
         </el-form-item>
