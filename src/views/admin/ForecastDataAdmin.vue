@@ -123,8 +123,8 @@ async function loadData() {
 }
 
 function normalizeModelSelection() {
-  if (query.varModel && !modelOptions.value.includes(query.varModel)) {
-    query.varModel = ''
+  if (!query.varModel || !modelOptions.value.includes(query.varModel)) {
+    query.varModel = modelOptions.value[0] || ''
   }
 }
 
@@ -132,7 +132,6 @@ async function datasetChanged() {
   query.page = 1
   query.year = ''
   query.month = ''
-  query.varModel = ''
   normalizeModelSelection()
   await loadData()
 }
