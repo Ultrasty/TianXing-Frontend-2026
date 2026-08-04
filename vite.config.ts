@@ -34,9 +34,11 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:8888',
         changeOrigin: true,
-
-        // /api/enso/... 转成 /enso/...
         rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+      '/admin': {
+        target: 'http://localhost:8888',
+        changeOrigin: true,
       },
     },
   },

@@ -5,6 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ADMIN_TOKEN_KEY,
   adminLogout,
+  createForecastData,
   deleteForecastData,
   getForecastData,
   getForecastDataById,
@@ -38,6 +39,7 @@ const query = reactive({
 
 const currentDataset = computed(() => datasets.value.find(item => item.name === query.dataset))
 const modelOptions = computed(() => currentDataset.value?.models || [])
+const isEcmwfSupported = computed(() => query.dataset === 'NAO' && query.varModel === 'grid_NAO_MCD')
 
 const editVisible = ref(false)
 const editLoading = ref(false)
@@ -83,7 +85,7 @@ function errorMessage(error: any, fallback: string) {
     || fallback
 }
 
-function dataPreview(row: ForecastDataRecord) {
+function dataPreview(row: any) {
   const text = row.data_preview || ''
   if (!text) return ''
   const suffix = (row.data_length || 0) > text.length ? '…' : ''
@@ -139,11 +141,11 @@ async function search() {
   await loadData()
 }
 
-async function openEdit(row: ForecastDataRecord) {
+async function openEdit(row: any) {
   try {
     const res = await getForecastDataById(query.dataset, row.id)
     const full = res.data as ForecastDataRecord
-    editingId.value = full.id
+    editingId.value = row.id
     editForm.year = String(full.year ?? '')
     editForm.month = String(full.month ?? '')
     editForm.varModel = String(full.var_model ?? '')
@@ -180,7 +182,7 @@ async function submitEdit() {
   }
 }
 
-async function removeRow(row: ForecastDataRecord) {
+async function removeRow(row: any) {
   try {
     await ElMessageBox.confirm(
       `确认删除 ${query.dataset} / ${row.year}-${row.month} / ${row.var_model}（ID=${row.id}）吗？此操作不可恢复。`,
@@ -227,7 +229,49 @@ async function submitUpload() {
     uploadVisible.value = false
     await loadData()
   } catch (error: any) {
-    ElMessage.error(errorMessage(error, '上传失败'))
+    const msg = errorMessage(error, '上传失败')
+    if (error?.response?.status === 409 || msg.includes('已存在')) {
+      uploadLoading.value = false
+      try {
+        await ElMessageBox.confirm(
+          `检测到 ${query.dataset} / ${uploadForm.year}-${uploadForm.month} / ${uploadForm.varModel} 已存在数据。确定要覆盖更新原记录吗？`,
+          '数据已存在',
+          { type: 'warning', confirmButtonText: '确定覆盖', cancelButtonText: '取消' }
+        )
+        // 用户确认覆盖：查找已有记录 ID 自动执行手动更新
+        const existingRow = rows.value.find(
+          r => r.year === uploadForm.year && r.month === uploadForm.month && r.var_model === uploadForm.varModel
+        )
+        const content = await uploadForm.file.text()
+        JSON.parse(content)
+        if (existingRow?.id) {
+          await updateForecastData(existingRow.id, {
+            dataset: query.dataset,
+            year: uploadForm.year,
+            month: uploadForm.month,
+            varModel: uploadForm.varModel,
+            data: content,
+          })
+        } else {
+          // 兜底方案
+          await createForecastData({
+            dataset: query.dataset,
+            year: uploadForm.year,
+            month: uploadForm.month,
+            varModel: uploadForm.varModel,
+            data: content,
+          })
+        }
+        ElMessage.success('数据覆盖更新成功')
+        uploadVisible.value = false
+        await loadData()
+      } catch (confirmErr: any) {
+        if (confirmErr === 'cancel' || confirmErr === 'close') return
+        ElMessage.error(errorMessage(confirmErr, '覆盖更新失败'))
+      }
+    } else {
+      ElMessage.error(msg)
+    }
   } finally {
     uploadLoading.value = false
   }
@@ -238,10 +282,17 @@ function openEcmwf() {
   ecmwfForm.month = query.month || String(new Date().getMonth() + 1)
   ecmwfForm.varModel = query.varModel || modelOptions.value[0] || ''
   ecmwfForm.date = ''
+  if (query.dataset === 'NAO') {
+    ecmwfForm.param = 'msl'
+  } else if (query.dataset === 'SIE') {
+    ecmwfForm.param = 'ci'
+  } else {
+    ecmwfForm.param = 'skt'
+  }
   ecmwfVisible.value = true
 }
 
-async function submitEcmwf() {
+async function submitEcmwf(overwrite: boolean = false) {
   ecmwfLoading.value = true
   try {
     await importForecastFromEcmwf({
@@ -259,12 +310,30 @@ async function submitEcmwf() {
       type: ecmwfForm.type,
       source: ecmwfForm.source,
       model: ecmwfForm.model,
+      overwrite: overwrite || undefined,
     })
-    ElMessage.success('ECMWF 数据获取并发布成功')
+    ElMessage.success(overwrite ? 'ECMWF 数据覆盖更新成功' : 'ECMWF 数据获取并发布成功')
     ecmwfVisible.value = false
     await loadData()
   } catch (error: any) {
-    ElMessage.error(errorMessage(error, 'ECMWF 导入失败'))
+    const msg = errorMessage(error, 'ECMWF 导入失败')
+    if (!overwrite && (error?.response?.status === 409 || msg.includes('已存在'))) {
+      ecmwfLoading.value = false
+      try {
+        await ElMessageBox.confirm(
+          `检测到 ${query.dataset} / ${ecmwfForm.year}-${ecmwfForm.month} / ${ecmwfForm.varModel} 已存在数据。确定要覆盖更新原记录吗？`,
+          '数据已存在',
+          { type: 'warning', confirmButtonText: '确定覆盖', cancelButtonText: '取消' }
+        )
+        // 用户确认覆盖：重新调用 submitEcmwf(true)
+        await submitEcmwf(true)
+      } catch (confirmErr: any) {
+        if (confirmErr === 'cancel' || confirmErr === 'close') return
+        ElMessage.error(errorMessage(confirmErr, '覆盖更新失败'))
+      }
+    } else {
+      ElMessage.error(msg)
+    }
   } finally {
     ecmwfLoading.value = false
   }
@@ -320,7 +389,15 @@ onMounted(async () => {
         <el-form-item label=" ">
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="openUpload">手动上传并发布</el-button>
-          <el-button type="success" @click="openEcmwf">从 ECMWF 获取并发布</el-button>
+          <el-tooltip
+            :disabled="isEcmwfSupported"
+            content="此模型为外部 AI 算法预测指数，须使用【手动上传】；仅 grid_NAO_MCD 支持从 ECMWF 拉取气压网格"
+            placement="top"
+          >
+            <span>
+              <el-button type="success" :disabled="!isEcmwfSupported" @click="openEcmwf">从 ECMWF 获取并发布</el-button>
+            </span>
+          </el-tooltip>
         </el-form-item>
       </el-form>
     </el-card>
@@ -339,7 +416,7 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="操作" width="170" fixed="right">
           <template #default="scope">
-            <el-button link type="primary" @click="openEdit(scope.row)">更新</el-button>
+            <el-button link type="primary" @click="openEdit(scope.row)">手动更新</el-button>
             <el-button link type="danger" @click="removeRow(scope.row)">删除</el-button>
           </template>
         </el-table-column>
@@ -358,7 +435,7 @@ onMounted(async () => {
       </div>
     </el-card>
 
-    <el-dialog v-model="editVisible" title="更新已有预报数据" width="760px">
+    <el-dialog v-model="editVisible" title="手动更新预报数据" width="760px">
       <el-form label-width="100px">
         <el-form-item label="年份"><el-input v-model="editForm.year" /></el-form-item>
         <el-form-item label="月份"><el-input v-model="editForm.month" /></el-form-item>
@@ -458,7 +535,7 @@ onMounted(async () => {
       </el-form>
       <template #footer>
         <el-button @click="ecmwfVisible = false">取消</el-button>
-        <el-button type="success" :loading="ecmwfLoading" @click="submitEcmwf">获取并发布</el-button>
+        <el-button type="success" :loading="ecmwfLoading" @click="() => submitEcmwf()">获取并发布</el-button>
       </template>
     </el-dialog>
   </div>

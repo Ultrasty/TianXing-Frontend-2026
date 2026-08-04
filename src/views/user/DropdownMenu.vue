@@ -20,7 +20,7 @@ interface SubMenu {
   name: string;
 }
 
-const props = defineProps<{
+defineProps<{
   title: string;
   subMenus: SubMenu[];
   isVisible: boolean;
