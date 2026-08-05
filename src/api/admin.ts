@@ -95,6 +95,42 @@ export interface EcmwfPreview {
   notice: string
 }
 
+export interface NsidcEvaluationRequest {
+  category: 'SIC' | 'SIE'
+  year: string
+  month?: string
+  day?: string
+  leadStartOffsetDays?: 0 | 1
+  mode: 'PREVIEW' | 'UPSERT'
+}
+
+export interface NsidcEvaluationResult {
+  source: 'NSIDC'
+  dataKind: 'EVALUATION_METRIC'
+  category: 'SIC' | 'SIE'
+  predictionModel: 'SIC_Ice-BCNet' | 'prediction_IceTFT'
+  observation: {
+    datasetId: string
+    name?: string
+    version: string
+    doi?: string
+    accessedAt?: string
+    urls?: Record<string, string>
+    sha256?: Record<string, string>
+  }
+  matching: Record<string, unknown>
+  metricDefinitions: Record<string, string>
+  diagnostics: Array<Record<string, unknown>>
+  records: EvaluationPayload[]
+  published: boolean
+  publication?: {
+    mode: 'UPSERT'
+    inserted: number
+    updated: number
+    recordIds: number[]
+  }
+}
+
 const defaultBaseUrl = import.meta.env.DEV ? 'http://localhost:8888' : '/api'
 
 export const adminHttp = axios.create({
@@ -182,6 +218,15 @@ export async function fetchEcmwfPreview(payload: EcmwfPreviewRequest) {
   const response = await adminHttp.post<AdminApiResponse<EcmwfPreview>>(
     '/admin/evaluations/ecmwf/preview',
     payload,
+  )
+  return response.data.data
+}
+
+export async function evaluateWithNsidc(payload: NsidcEvaluationRequest) {
+  const response = await adminHttp.post<AdminApiResponse<NsidcEvaluationResult>>(
+    '/admin/evaluations/nsidc/evaluate',
+    payload,
+    { timeout: 900_000 },
   )
   return response.data.data
 }

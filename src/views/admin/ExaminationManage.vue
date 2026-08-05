@@ -6,6 +6,7 @@ import { Back, Delete, Download, Edit, Plus, Refresh, Upload, Connection, Switch
 import {
   createEvaluation,
   deleteEvaluation,
+  evaluateWithNsidc,
   fetchEcmwfPreview,
   getAdminApiError,
   getEvaluationMetadata,
@@ -18,6 +19,7 @@ import {
   type EvaluationRecord,
   type EcmwfPreview,
   type ImportMode,
+  type NsidcEvaluationResult,
 } from '@/api/admin'
 import { clearAdminSession } from '@/utils/adminAuth'
 
@@ -71,6 +73,17 @@ const ecmwf = reactive({
   forecastType: 'fc',
   reducer: 'MEAN' as 'MEAN' | 'ROW_MEAN' | 'SAMPLE',
   maxPoints: 200,
+})
+
+const nsidcVisible = ref(false)
+const nsidcLoading = ref(false)
+const nsidcResult = ref<NsidcEvaluationResult | null>(null)
+const nsidc = reactive({
+  category: 'SIC' as 'SIC' | 'SIE',
+  year: '2023',
+  month: '4',
+  day: '22',
+  leadStartOffsetDays: 0 as 0 | 1,
 })
 
 const currentMetadata = computed(() => metadata.value?.categories[activeCategory.value])
@@ -319,6 +332,47 @@ function downloadEcmwfPreview() {
   URL.revokeObjectURL(url)
 }
 
+function openNsidc() {
+  nsidc.category = activeCategory.value === 'SIE' ? 'SIE' : 'SIC'
+  if (nsidc.category === 'SIE') nsidc.year = '2022'
+  nsidcResult.value = null
+  nsidcVisible.value = true
+}
+
+async function runNsidc(mode: 'PREVIEW' | 'UPSERT') {
+  if (!/^\d{4}$/.test(nsidc.year)) {
+    ElMessage.warning('年份必须是四位数字')
+    return
+  }
+  if (nsidc.category === 'SIC' && (!nsidc.month || !nsidc.day)) {
+    ElMessage.warning('SIC 评估必须填写起报月和日')
+    return
+  }
+  nsidcLoading.value = true
+  try {
+    nsidcResult.value = await evaluateWithNsidc({
+      category: nsidc.category,
+      year: nsidc.year,
+      month: nsidc.category === 'SIC' ? nsidc.month : undefined,
+      day: nsidc.category === 'SIC' ? nsidc.day : undefined,
+      leadStartOffsetDays: nsidc.category === 'SIC' ? nsidc.leadStartOffsetDays : undefined,
+      mode,
+    })
+    if (mode === 'UPSERT') {
+      const publication = nsidcResult.value.publication
+      ElMessage.success(`真实指标已发布：新增 ${publication?.inserted || 0} 条，更新 ${publication?.updated || 0} 条`)
+      activeCategory.value = nsidc.category
+      await loadData()
+    } else {
+      ElMessage.success('NSIDC 真实指标计算完成，尚未写入数据库')
+    }
+  } catch (error) {
+    ElMessage.error(getAdminApiError(error, 'NSIDC 指标计算失败'))
+  } finally {
+    nsidcLoading.value = false
+  }
+}
+
 function formatData(value: unknown) {
   const json = JSON.stringify(value)
   return json.length > 100 ? `${json.slice(0, 100)}…` : json
@@ -383,6 +437,7 @@ onMounted(async () => {
       </div>
       <div class="operations">
         <el-button :icon="Upload" @click="importVisible = true">导入 JSON</el-button>
+        <el-button type="warning" plain :icon="Connection" @click="openNsidc">NSIDC 科学评估</el-button>
         <el-button type="success" plain :icon="Connection" @click="openEcmwf">ECMWF 原始场</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">发布数据</el-button>
       </div>
@@ -451,6 +506,81 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="editorVisible = false">取消</el-button>
         <el-button type="primary" :loading="saving" @click="saveRecord">{{ editing ? '保存更新' : '确认发布' }}</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog
+      v-if="nsidcVisible"
+      key="nsidc-dialog"
+      v-model="nsidcVisible"
+      title="NSIDC 真实 SIC / SIE 指标计算"
+      width="860px"
+      destroy-on-close
+    >
+      <el-alert
+        type="success"
+        :closable="false"
+        show-icon
+        title="预测值来自现有 Ice-BCNet / IceTFT；观测值实时取自 NSIDC 官方产品，结果保留版本、URL 与 SHA-256。"
+      />
+      <el-form class="ecmwf-form" label-position="top">
+        <div class="form-grid three">
+          <el-form-item label="评估类别">
+            <el-radio-group v-model="nsidc.category" @change="nsidcResult = null">
+              <el-radio-button value="SIC">SIC</el-radio-button>
+              <el-radio-button value="SIE">SIE</el-radio-button>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item :label="nsidc.category === 'SIC' ? '起报年份' : '起报样本年份'">
+            <el-input v-model="nsidc.year" placeholder="2023" />
+          </el-form-item>
+          <template v-if="nsidc.category === 'SIC'">
+            <el-form-item label="起报月份"><el-input v-model="nsidc.month" placeholder="4" /></el-form-item>
+            <el-form-item label="起报日"><el-input v-model="nsidc.day" placeholder="22" /></el-form-item>
+            <el-form-item label="数组第 1 帧对应日期">
+              <el-select v-model="nsidc.leadStartOffsetDays">
+                <el-option label="起报当天（推荐）" :value="0" />
+                <el-option label="起报次日" :value="1" />
+              </el-select>
+            </el-form-item>
+          </template>
+        </div>
+        <el-alert
+          type="info"
+          :closable="false"
+          :title="nsidc.category === 'SIC'
+            ? 'SIC：下载 MASAM2 V2 月文件并缓存，重网格到 384×420 模型网格，计算逐提前 1–7 天 RMSE/BACC。首次下载约需 1–5 分钟。'
+            : 'SIE：以该年全部月起报为样本，对提前 1–12 月计算 RMSD、偏差平方、误差方差、相关系数和标准差。'"
+        />
+        <template v-if="nsidcResult">
+          <el-divider content-position="left">可追溯计算结果</el-divider>
+          <p class="metadata-line">
+            预测：{{ nsidcResult.predictionModel }} · 观测：{{ nsidcResult.observation.datasetId }}
+            V{{ nsidcResult.observation.version }} · DOI：{{ nsidcResult.observation.doi || '—' }} ·
+            状态：{{ nsidcResult.published ? '已发布' : '仅预览' }}
+          </p>
+          <el-table :data="nsidcResult.records" size="small" border>
+            <el-table-column prop="varModel" label="指标" width="150" />
+            <el-table-column label="结果数组">
+              <template #default="{ row }"><code>{{ JSON.stringify(row.data) }}</code></template>
+            </el-table-column>
+          </el-table>
+          <el-collapse class="nsidc-details">
+            <el-collapse-item title="查看匹配规则、诊断与文件校验信息" name="details">
+              <el-input
+                :model-value="JSON.stringify({ matching: nsidcResult.matching, metricDefinitions: nsidcResult.metricDefinitions, diagnostics: nsidcResult.diagnostics, observation: nsidcResult.observation }, null, 2)"
+                type="textarea"
+                :rows="12"
+                readonly
+              />
+            </el-collapse-item>
+          </el-collapse>
+        </template>
+      </el-form>
+      <template #footer>
+        <el-button @click="nsidcVisible = false">关闭</el-button>
+        <el-button :loading="nsidcLoading" @click="runNsidc('PREVIEW')">只计算预览</el-button>
+        <el-button type="primary" :loading="nsidcLoading" @click="runNsidc('UPSERT')">计算并发布</el-button>
       </template>
     </el-dialog>
 
@@ -544,6 +674,7 @@ code { color: #34536a; font-family: Consolas, monospace; white-space: normal; ov
 .form-grid :deep(.el-select), .form-grid :deep(.el-input-number) { width: 100%; }
 .ecmwf-form { margin-top: 20px; }
 .metadata-line { color: #657b8d; font-size: 13px; }
+.nsidc-details { margin-top: 16px; }
 @media (max-width: 900px) {
   .admin-page { padding: 16px; }
   .admin-header, .toolbar { align-items: flex-start; flex-direction: column; }
