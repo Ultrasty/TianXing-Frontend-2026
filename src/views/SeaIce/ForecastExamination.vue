@@ -106,6 +106,7 @@ const updateTab1 = () => {
       const persistenceRmseKey = `${selectedYear.value}_per_RMSE`;
       const sampleCount = Math.max(response.data[baccKey]?.length || 0, response.data[rmseKey]?.length || 0);
       const metricSamples = Array.from({ length: sampleCount }, (_, index) => `样本${index + 1}`);
+      const asPercent = (key) => (response.data[key] || []).map(value => value * 100);
       option1.value = {
         title: {
           text: chartTitle.value,
@@ -132,13 +133,13 @@ const updateTab1 = () => {
           {
             name: 'ours',
             type: 'line',
-            data: response.data[baccKey] || [],
+            data: asPercent(baccKey),
 
           },
           {
             name: 'persistence',
             type: 'line',
-            data: response.data[persistenceBaccKey] || [],
+            data: asPercent(persistenceBaccKey),
           },
 
         ]
@@ -166,12 +167,12 @@ const updateTab1 = () => {
           {
             name: 'ours',
             type: 'line',
-            data: response.data[rmseKey] || [],
+            data: asPercent(rmseKey),
           },
           {
             name: 'persistence',
             type: 'line',
-            data: response.data[persistenceRmseKey] || [],
+            data: asPercent(persistenceRmseKey),
           },
 
         ]
