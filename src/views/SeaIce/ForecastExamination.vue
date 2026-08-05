@@ -100,6 +100,12 @@ const updateTab1 = () => {
   axios.get('/seaice/error?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
     .then(response => {
       console.log(response.data);
+      const baccKey = `${selectedYear.value}_BACC`;
+      const persistenceBaccKey = `${selectedYear.value}_per_BACC`;
+      const rmseKey = `${selectedYear.value}_RMSE`;
+      const persistenceRmseKey = `${selectedYear.value}_per_RMSE`;
+      const sampleCount = Math.max(response.data[baccKey]?.length || 0, response.data[rmseKey]?.length || 0);
+      const metricSamples = Array.from({ length: sampleCount }, (_, index) => `样本${index + 1}`);
       option1.value = {
         title: {
           text: chartTitle.value,
@@ -109,7 +115,7 @@ const updateTab1 = () => {
         xAxis: {
           type: 'category',
           name: '时间',
-          data: chartX.value
+          data: metricSamples
         },
         yAxis: {
           type: 'value',
@@ -126,13 +132,13 @@ const updateTab1 = () => {
           {
             name: 'ours',
             type: 'line',
-            data: response.data["2023_BACC"],
+            data: response.data[baccKey] || [],
 
           },
           {
             name: 'persistence',
             type: 'line',
-            data: response.data["2023_per_BACC"],
+            data: response.data[persistenceBaccKey] || [],
           },
 
         ]
@@ -143,7 +149,7 @@ const updateTab1 = () => {
         xAxis: {
           type: 'category',
           name: '时间',
-          data: chartX.value
+          data: metricSamples
         },
         yAxis: {
           type: 'value',
@@ -160,12 +166,12 @@ const updateTab1 = () => {
           {
             name: 'ours',
             type: 'line',
-            data: response.data["2023_RMSE"],
+            data: response.data[rmseKey] || [],
           },
           {
             name: 'persistence',
             type: 'line',
-            data: response.data["2023_per_RMSE"],
+            data: response.data[persistenceRmseKey] || [],
           },
 
         ]
@@ -307,9 +313,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
@@ -338,9 +342,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
@@ -376,9 +378,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
@@ -408,9 +408,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
