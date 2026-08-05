@@ -72,11 +72,6 @@ export interface ImportResult {
 }
 
 export interface EcmwfPreviewRequest {
-  category: EvaluationCategory
-  year: string
-  month?: string
-  day?: string
-  varModel?: string
   date?: string
   time?: number
   step?: number
@@ -93,9 +88,11 @@ export interface EcmwfPreviewRequest {
 
 export interface EcmwfPreview {
   source: 'ECMWF'
-  category: EvaluationCategory
-  record: EvaluationPayload
+  dataKind: 'RAW_FIELD_REDUCTION'
+  publishable: false
+  values: unknown[]
   metadata: Record<string, unknown>
+  notice: string
 }
 
 const defaultBaseUrl = import.meta.env.DEV ? 'http://localhost:8888' : '/api'
@@ -178,20 +175,6 @@ export async function importEvaluationFile(category: EvaluationCategory, mode: I
     form,
     { params: { category, mode } },
   )
-  return response.data.data
-}
-
-export async function importEcmwfBatch(
-  category: EvaluationCategory,
-  mode: ImportMode,
-  records: EvaluationPayload[],
-) {
-  const response = await adminHttp.post<AdminApiResponse<ImportResult>>('/admin/evaluations/import/batch', {
-    source: 'ECMWF',
-    category,
-    mode,
-    records,
-  })
   return response.data.data
 }
 

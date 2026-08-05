@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
-import { Back, Delete, Edit, Plus, Refresh, Upload, Connection, SwitchButton } from '@element-plus/icons-vue'
+import { Back, Delete, Download, Edit, Plus, Refresh, Upload, Connection, SwitchButton } from '@element-plus/icons-vue'
 import {
   createEvaluation,
   deleteEvaluation,
@@ -10,7 +10,6 @@ import {
   getAdminApiError,
   getEvaluationMetadata,
   getEvaluations,
-  importEcmwfBatch,
   importEvaluationFile,
   updateEvaluation,
   type EvaluationCategory,
@@ -59,14 +58,8 @@ const importing = ref(false)
 
 const ecmwfVisible = ref(false)
 const ecmwfLoading = ref(false)
-const ecmwfImporting = ref(false)
 const ecmwfPreview = ref<EcmwfPreview | null>(null)
 const ecmwf = reactive({
-  category: 'SIE' as EvaluationCategory,
-  year: String(new Date().getFullYear()),
-  month: String(new Date().getMonth() + 1),
-  day: String(new Date().getDate()),
-  varModel: 'RMSD',
   date: '',
   time: 0,
   step: 24,
@@ -283,12 +276,6 @@ async function uploadImport() {
 function openEcmwf() {
   // 先挂载独立弹窗，避免 Element Plus 在相邻 dialog 刚销毁时复用旧节点。
   ecmwfVisible.value = true
-  ecmwf.category = activeCategory.value
-  ecmwf.year = activeCategory.value === 'NAO' ? 'all' : (filters.year || String(new Date().getFullYear()))
-  ecmwf.month = activeCategory.value === 'NAO' ? 'all' : (filters.month || String(new Date().getMonth() + 1))
-  ecmwf.day = filters.day || String(new Date().getDate())
-  ecmwf.varModel = ''
-  normalizeFields(ecmwf)
   ecmwfPreview.value = null
 }
 
@@ -301,11 +288,6 @@ async function previewEcmwf() {
   ecmwfPreview.value = null
   try {
     ecmwfPreview.value = await fetchEcmwfPreview({
-      category: ecmwf.category,
-      year: ecmwf.year,
-      month: hasField(ecmwf.category, 'month') ? ecmwf.month : undefined,
-      day: hasField(ecmwf.category, 'day') ? ecmwf.day : undefined,
-      varModel: hasField(ecmwf.category, 'varModel') ? ecmwf.varModel : undefined,
       date: ecmwf.date || undefined,
       time: ecmwf.time,
       step: ecmwf.step,
@@ -318,7 +300,7 @@ async function previewEcmwf() {
       reducer: ecmwf.reducer,
       maxPoints: ecmwf.maxPoints,
     })
-    ElMessage.success('ECMWF 真实数据获取与转换成功')
+    ElMessage.success('ECMWF 原始场获取与归约成功')
   } catch (error) {
     ElMessage.error(getAdminApiError(error, 'ECMWF 获取失败'))
   } finally {
@@ -326,20 +308,15 @@ async function previewEcmwf() {
   }
 }
 
-async function publishEcmwf() {
+function downloadEcmwfPreview() {
   if (!ecmwfPreview.value) return
-  ecmwfImporting.value = true
-  try {
-    const result = await importEcmwfBatch(ecmwf.category, 'UPSERT', [ecmwfPreview.value.record])
-    ElMessage.success(`ECMWF 入库完成：新增 ${result.inserted} 条，更新 ${result.updated} 条`)
-    ecmwfVisible.value = false
-    activeCategory.value = ecmwf.category
-    await loadData()
-  } catch (error) {
-    ElMessage.error(getAdminApiError(error, 'ECMWF 入库失败'))
-  } finally {
-    ecmwfImporting.value = false
-  }
+  const blob = new Blob([JSON.stringify(ecmwfPreview.value, null, 2)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = `ecmwf-raw-preview-${Date.now()}.json`
+  anchor.click()
+  URL.revokeObjectURL(url)
 }
 
 function formatData(value: unknown) {
@@ -360,9 +337,6 @@ watch(activeCategory, () => {
 
 watch(() => form.category, () => normalizeFields(form))
 watch(() => form.year, () => normalizeFields(form))
-watch(() => ecmwf.category, () => { ecmwfPreview.value = null; normalizeFields(ecmwf) })
-watch(() => ecmwf.year, () => { ecmwfPreview.value = null; normalizeFields(ecmwf) })
-
 onMounted(async () => {
   try {
     metadata.value = await getEvaluationMetadata()
@@ -409,7 +383,7 @@ onMounted(async () => {
       </div>
       <div class="operations">
         <el-button :icon="Upload" @click="importVisible = true">导入 JSON</el-button>
-        <el-button type="success" plain :icon="Connection" @click="openEcmwf">ECMWF 获取</el-button>
+        <el-button type="success" plain :icon="Connection" @click="openEcmwf">ECMWF 原始场</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">发布数据</el-button>
       </div>
     </section>
@@ -505,7 +479,7 @@ onMounted(async () => {
       v-if="ecmwfVisible"
       key="ecmwf-dialog"
       v-model="ecmwfVisible"
-      title="ECMWF Open Data 真实获取"
+      title="ECMWF Open Data 原始场获取与预览"
       width="820px"
       destroy-on-close
     >
@@ -513,19 +487,10 @@ onMounted(async () => {
         type="warning"
         :closable="false"
         show-icon
-        title="Open Data 仅保留最近约 2–3 天的实时预报。此功能将 GRIB 字段按选定规则转成数组；用于科研评分时仍需上游校验计算。"
+        title="这里展示的是 ECMWF 原始预报场的工程归约结果，不是 RMSD、BACC 或相关系数，系统不会把它直接写入评估表。"
       />
       <el-form class="ecmwf-form" label-position="top">
         <div class="form-grid three">
-          <el-form-item label="入库类别">
-            <el-select v-model="ecmwf.category"><el-option v-for="category in categories" :key="category" :label="category" :value="category" /></el-select>
-          </el-form-item>
-          <el-form-item label="年份"><el-input v-model="ecmwf.year" :disabled="ecmwf.category === 'NAO'" /></el-form-item>
-          <el-form-item v-if="hasField(ecmwf.category, 'month')" label="月份"><el-input v-model="ecmwf.month" :disabled="ecmwf.category === 'NAO'" /></el-form-item>
-          <el-form-item v-if="hasField(ecmwf.category, 'day')" label="日"><el-input v-model="ecmwf.day" /></el-form-item>
-          <el-form-item v-if="hasField(ecmwf.category, 'varModel')" label="评估指标">
-            <el-select v-model="ecmwf.varModel" filterable><el-option v-for="model in varModels(ecmwf.category, ecmwf.year)" :key="model" :label="model" :value="model" :disabled="model.includes('{year}')" /></el-select>
-          </el-form-item>
           <el-form-item label="ECMWF 参数"><el-input v-model="ecmwf.param" placeholder="2t / msl / t / u / v" /></el-form-item>
           <el-form-item label="起报日期（留空=最新）"><el-input v-model="ecmwf.date" placeholder="YYYY-MM-DD" /></el-form-item>
           <el-form-item label="起报时次 UTC"><el-select v-model="ecmwf.time"><el-option v-for="time in [0, 6, 12, 18]" :key="time" :label="`${time}:00`" :value="time" /></el-select></el-form-item>
@@ -534,23 +499,24 @@ onMounted(async () => {
           <el-form-item label="数据源"><el-select v-model="ecmwf.provider"><el-option label="ECMWF" value="ecmwf" /><el-option label="AWS" value="aws" /><el-option label="Google" value="google" /><el-option label="Azure" value="azure" /></el-select></el-form-item>
           <el-form-item label="层类型"><el-input v-model="ecmwf.levtype" placeholder="sfc / pl" /></el-form-item>
           <el-form-item label="压力层（可选）"><el-input-number v-model="ecmwf.levelist" :min="1" :max="1000" /></el-form-item>
-          <el-form-item label="转换规则"><el-select v-model="ecmwf.reducer"><el-option label="空间平均（单值）" value="MEAN" /><el-option label="逐行平均" value="ROW_MEAN" /><el-option label="均匀抽样" value="SAMPLE" /></el-select></el-form-item>
+          <el-form-item label="预览归约规则"><el-select v-model="ecmwf.reducer"><el-option label="未加权网格平均（单值）" value="MEAN" /><el-option label="逐行平均（仅预览）" value="ROW_MEAN" /><el-option label="均匀抽样（仅预览）" value="SAMPLE" /></el-select></el-form-item>
           <el-form-item v-if="ecmwf.reducer === 'SAMPLE'" label="最大采样点"><el-input-number v-model="ecmwf.maxPoints" :min="1" :max="5000" /></el-form-item>
         </div>
         <el-button type="primary" plain :icon="Connection" :loading="ecmwfLoading" @click="previewEcmwf">获取并生成预览</el-button>
         <template v-if="ecmwfPreview">
-          <el-divider content-position="left">真实数据预览</el-divider>
-          <el-input :model-value="JSON.stringify(ecmwfPreview.record.data, null, 2)" type="textarea" :rows="7" readonly />
+          <el-divider content-position="left">原始场归约预览</el-divider>
+          <el-input :model-value="JSON.stringify(ecmwfPreview.values, null, 2)" type="textarea" :rows="7" readonly />
           <p class="metadata-line">
             实际源：{{ ecmwfSummary.provider }} · 起报：{{ ecmwfSummary.forecastDatetime }} ·
             字段：{{ ecmwfSummary.field }}（{{ ecmwfSummary.units }}）· 网格点：{{ ecmwfSummary.totalGridPoints }} ·
-            转换结果长度：{{ Array.isArray(ecmwfPreview.record.data) ? ecmwfPreview.record.data.length : 0 }}
+            转换结果长度：{{ ecmwfPreview.values.length }}
           </p>
+          <el-alert type="info" :closable="false" :title="ecmwfPreview.notice" />
         </template>
       </el-form>
       <template #footer>
         <el-button @click="ecmwfVisible = false">取消</el-button>
-        <el-button type="success" :disabled="!ecmwfPreview" :loading="ecmwfImporting" @click="publishEcmwf">以 UPSERT 方式入库</el-button>
+        <el-button type="primary" :icon="Download" :disabled="!ecmwfPreview" @click="downloadEcmwfPreview">下载预览 JSON</el-button>
       </template>
     </el-dialog>
   </main>
