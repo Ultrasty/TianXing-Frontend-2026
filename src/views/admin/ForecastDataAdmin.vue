@@ -39,8 +39,25 @@ const query = reactive({
 })
 
 const currentDataset = computed(() => datasets.value.find(item => item.name === query.dataset))
-const modelOptions = computed(() => currentDataset.value?.models || [])
+const modelOptions = computed(() => {
+  if (query.dataset === 'NAO') {
+    return ['grid_NAO_MCD', 'index_NAO_MCD']
+  }
+  if (query.dataset === 'ENSO') {
+    return ['nino34_mean', 'nino34_asc', 'nino34_gtc', 'nino34_mc']
+  }
+  if (query.dataset === 'SIE') {
+    return ['prediction_IceTFT', 'mean_IceTFT', 'upper_IceTFT', 'lower_IceTFT']
+  }
+  return currentDataset.value?.models || []
+})
+
 const isEcmwfSupported = computed(() => query.dataset === 'NAO' && query.varModel === 'grid_NAO_MCD')
+const isNoaaIndexSupported = computed(() => {
+  if (query.dataset === 'NAO' && query.varModel === 'index_NAO_MCD') return true
+  if (query.dataset === 'ENSO' && query.varModel === 'nino34_asc') return true
+  return false
+})
 
 const editVisible = ref(false)
 const editLoading = ref(false)
@@ -73,10 +90,21 @@ const ecmwfForm = reactive({
   param: '2t',
   levtype: '',
   levelist: undefined as number | undefined,
-  stream: '',
+  stream: 'mmsa',
   type: 'fc',
   source: 'ecmwf',
   model: 'ifs',
+})
+
+const noaaVisible = ref(false)
+const noaaLoading = ref(false)
+const noaaForm = reactive({
+  year: '',
+  month: '',
+  varModel: '',
+  source: 'noaa_cpc',
+  leadMonths: 6,
+  smoothing: 'raw',
 })
 
 function errorMessage(error: any, fallback: string) {
@@ -284,10 +312,13 @@ function openEcmwf() {
   ecmwfForm.date = ''
   if (query.dataset === 'NAO') {
     ecmwfForm.param = 'msl'
+    ecmwfForm.source = 'cds'
   } else if (query.dataset === 'SIE') {
     ecmwfForm.param = 'ci'
+    ecmwfForm.source = 'ecmwf'
   } else {
     ecmwfForm.param = 'skt'
+    ecmwfForm.source = 'ecmwf'
   }
   ecmwfVisible.value = true
 }
@@ -295,7 +326,7 @@ function openEcmwf() {
 async function submitEcmwf(overwrite: boolean = false) {
   ecmwfLoading.value = true
   try {
-    await importForecastFromEcmwf({
+    const res = await importForecastFromEcmwf({
       dataset: query.dataset,
       year: ecmwfForm.year,
       month: ecmwfForm.month,
@@ -312,7 +343,24 @@ async function submitEcmwf(overwrite: boolean = false) {
       model: ecmwfForm.model,
       overwrite: overwrite || undefined,
     })
-    ElMessage.success(overwrite ? 'ECMWF 数据覆盖更新成功' : 'ECMWF 数据获取并发布成功')
+    const rawSource = res.data?.ecmwf?.source || ecmwfForm.source
+    let sourceLabel = 'ECMWF 官方'
+    if (rawSource === 'Copernicus CDS (SEAS5)') {
+      sourceLabel = 'Copernicus CDS'
+    } else if (rawSource === 'aws') {
+      sourceLabel = 'AWS 镜像'
+    } else if (rawSource === 'google') {
+      sourceLabel = 'Google Cloud 镜像'
+    } else if (rawSource === 'azure') {
+      sourceLabel = 'Azure 镜像'
+    }
+
+    const sourceType = res.data?.ecmwf?.source_type || 'fetch'
+    if (sourceType === 'calculation') {
+      ElMessage.success(overwrite ? `ECMWF [${sourceLabel}] 数据覆盖并计算成功` : `ECMWF [${sourceLabel}] 数据获取并计算成功`)
+    } else {
+      ElMessage.success(overwrite ? `ECMWF [${sourceLabel}] 数据覆盖并直接拉取成功` : `ECMWF [${sourceLabel}] 数据直接拉取成功`)
+    }
     ecmwfVisible.value = false
     await loadData()
   } catch (error: any) {
@@ -339,28 +387,42 @@ async function submitEcmwf(overwrite: boolean = false) {
   }
 }
 
-const noaaLoading = ref(false)
+function openNoaaIndex() {
+  noaaForm.year = query.year || new Date().getFullYear().toString()
+  noaaForm.month = query.month || String(new Date().getMonth() + 1)
+  noaaForm.varModel = query.varModel || modelOptions.value[0] || ''
+  noaaForm.source = query.dataset === 'ENSO' ? 'noaa_ersst' : 'noaa_cpc'
+  noaaForm.leadMonths = 6
+  noaaForm.smoothing = 'raw'
+  noaaVisible.value = true
+}
 
 async function submitNoaaIndex(overwrite: boolean = false) {
-  const targetYear = query.year || new Date().getFullYear().toString()
-  const targetMonth = query.month || String(new Date().getMonth() + 1)
-  const targetVarModel = query.varModel || modelOptions.value[0] || ''
-
-  if (!targetVarModel) {
+  if (!noaaForm.varModel) {
     ElMessage.warning('请选择要拉取的 var_model')
     return
   }
 
   noaaLoading.value = true
   try {
-    await importIndexFromNoaa({
+    const res = await importIndexFromNoaa({
       dataset: query.dataset,
-      year: targetYear,
-      month: targetMonth,
-      varModel: targetVarModel,
+      year: noaaForm.year,
+      month: noaaForm.month,
+      varModel: noaaForm.varModel,
+      source: noaaForm.source,
+      leadMonths: noaaForm.leadMonths,
+      smoothing: noaaForm.smoothing,
       overwrite: overwrite || undefined,
     })
-    ElMessage.success(overwrite ? 'NOAA Index 覆盖更新成功' : 'NOAA 官方 Index 自动获取成功')
+    const actualSource = res.data?.noaa?.source || 'NOAA CPC'
+    const sourceType = res.data?.noaa?.source_type || 'fetch'
+    if (sourceType === 'calculation') {
+      ElMessage.success(overwrite ? `NOAA Index (${actualSource}) 覆盖并计算成功` : `NOAA Index (${actualSource}) 计算成功`)
+    } else {
+      ElMessage.success(overwrite ? `NOAA Index (${actualSource}) 覆盖并直接拉取成功` : `NOAA Index (${actualSource}) 直接拉取成功`)
+    }
+    noaaVisible.value = false
     await loadData()
   } catch (error: any) {
     const msg = errorMessage(error, 'NOAA 导入失败')
@@ -368,7 +430,7 @@ async function submitNoaaIndex(overwrite: boolean = false) {
       noaaLoading.value = false
       try {
         await ElMessageBox.confirm(
-          `检测到 ${query.dataset} / ${targetYear}-${targetMonth} / ${targetVarModel} 已存在数据。确定要覆盖更新原记录吗？`,
+          `检测到 ${query.dataset} / ${noaaForm.year}-${noaaForm.month} / ${noaaForm.varModel} 已存在数据。确定要覆盖更新原记录吗？`,
           '数据已存在',
           { type: 'warning', confirmButtonText: '确定覆盖', cancelButtonText: '取消' }
         )
@@ -435,15 +497,17 @@ onMounted(async () => {
         <el-form-item label=" ">
           <el-button type="primary" @click="search">查询</el-button>
           <el-button @click="openUpload">手动上传并发布</el-button>
-          <template v-if="query.dataset === 'NAO'">
-            <el-button v-if="isEcmwfSupported" type="success" @click="openEcmwf">从 ECMWF 获取并发布</el-button>
-            <el-button v-else type="warning" :loading="noaaLoading" @click="() => submitNoaaIndex()">从 NOAA 自动拉取 Index</el-button>
-          </template>
-          <el-tooltip
-            v-else
-            content="ENSO 及 SIE 数据集模型为外部 AI 算法预测产物，须使用【手动上传】"
-            placement="top"
-          >
+          <el-tooltip v-if="isEcmwfSupported" content="当前模型为 3D 气压网格，将自动从 ECMWF Open Data / Copernicus CDS 抓取并计算 Monthly Mean 气压场" placement="top">
+            <span>
+              <el-button type="success" @click="openEcmwf">从 ECMWF / CDS 获取并发布</el-button>
+            </span>
+          </el-tooltip>
+          <el-tooltip v-else-if="isNoaaIndexSupported" content="当前模型为一维指数型，将打开高级弹窗自动连接 NOAA 官方数据源实时拉取 Index" placement="top">
+            <span>
+              <el-button type="warning" @click="openNoaaIndex">从 NOAA 自动拉取 Index</el-button>
+            </span>
+          </el-tooltip>
+          <el-tooltip v-else content="该模型属于特定 AI 算法预测产物或置信区间，须使用【手动上传】" placement="top">
             <span>
               <el-button disabled type="info">在线获取受限</el-button>
             </span>
@@ -530,12 +594,12 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="ecmwfVisible" title="从 ECMWF Open Data 获取并发布" width="700px">
+    <el-dialog v-model="ecmwfVisible" title="从 ECMWF / Copernicus CDS 获取并发布" width="700px">
       <el-alert
         type="info"
         :closable="false"
         show-icon
-        title="date 留空会自动选择最新可用起报；ECMWF Open Data 仅保留近期滚动数据。"
+        title="date 留空会自动选择最新可用起报；NAO 气压网格将从 Copernicus CDS API 拉取季节预报；其余开放数据走 ECMWF/镜像源。"
         class="dialog-alert"
       />
       <el-form label-width="120px">
@@ -569,7 +633,8 @@ onMounted(async () => {
         </el-form-item>
         <el-form-item label="数据源">
           <el-select v-model="ecmwfForm.source" style="width: 100%">
-            <el-option label="ECMWF" value="ecmwf" />
+            <el-option label="Copernicus CDS 官方 API (欧盟哥白尼)" value="cds" />
+            <el-option label="ECMWF 官方源" value="ecmwf" />
             <el-option label="AWS 镜像" value="aws" />
             <el-option label="Google Cloud 镜像" value="google" />
             <el-option label="Azure 镜像" value="azure" />
@@ -586,6 +651,45 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="ecmwfVisible = false">取消</el-button>
         <el-button type="success" :loading="ecmwfLoading" @click="() => submitEcmwf()">获取并发布</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="noaaVisible" title="从 NOAA / 官方 自动拉取 Index" width="560px">
+      <el-form :model="noaaForm" label-width="130px">
+        <el-form-item label="数据集">
+          <el-input :value="query.dataset" disabled />
+        </el-form-item>
+        <el-form-item label="起报年份" required>
+          <el-input v-model="noaaForm.year" placeholder="如 2026" />
+        </el-form-item>
+        <el-form-item label="起报月份" required>
+          <el-input v-model="noaaForm.month" placeholder="1-12" />
+        </el-form-item>
+        <el-form-item label="目标 var_model" required>
+          <el-select v-model="noaaForm.varModel" style="width: 100%">
+            <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="指数数据源">
+          <el-select v-model="noaaForm.source" style="width: 100%">
+            <el-option label="NOAA CPC Monthly Index (NAO标准文本源)" value="noaa_cpc" />
+            <el-option label="NOAA ERSSTv5 Nino3.4 Index (ENSO海温源)" value="noaa_ersst" />
+            <el-option label="ERA5 Monthly Index (ECMWF导出的衍生源)" value="era5_derived" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="预报月数 (Months)">
+          <el-input-number v-model="noaaForm.leadMonths" :min="1" :max="12" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="滤波平滑算法">
+          <el-select v-model="noaaForm.smoothing" style="width: 100%">
+            <el-option label="Raw (原始官方标准离散值)" value="raw" />
+            <el-option label="3-Month Moving Average (3月滑动平均平滑)" value="moving_avg" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="noaaVisible = false">取消</el-button>
+        <el-button type="warning" :loading="noaaLoading" @click="() => submitNoaaIndex()">一键自动拉取并发布</el-button>
       </template>
     </el-dialog>
   </div>
