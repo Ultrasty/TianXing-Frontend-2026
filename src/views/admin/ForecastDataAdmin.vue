@@ -103,7 +103,7 @@ const noaaForm = reactive({
   month: '',
   varModel: '',
   source: 'noaa_cpc',
-  leadMonths: 6,
+  leadMonths: 12,
   smoothing: 'raw',
 })
 
@@ -390,9 +390,14 @@ async function submitEcmwf(overwrite: boolean = false) {
 function openNoaaIndex() {
   noaaForm.year = query.year || new Date().getFullYear().toString()
   noaaForm.month = query.month || String(new Date().getMonth() + 1)
-  noaaForm.varModel = query.varModel || modelOptions.value[0] || ''
-  noaaForm.source = query.dataset === 'ENSO' ? 'noaa_ersst' : 'noaa_cpc'
-  noaaForm.leadMonths = 6
+  if (query.dataset === 'ENSO') {
+    noaaForm.varModel = 'nino34_asc'
+    noaaForm.source = 'noaa_ersst'
+  } else {
+    noaaForm.varModel = query.varModel || modelOptions.value[0] || ''
+    noaaForm.source = 'noaa_cpc'
+  }
+  noaaForm.leadMonths = 12
   noaaForm.smoothing = 'raw'
   noaaVisible.value = true
 }
@@ -504,7 +509,7 @@ onMounted(async () => {
           </el-tooltip>
           <el-tooltip v-else-if="isNoaaIndexSupported" content="当前模型为一维指数型，将打开高级弹窗自动连接 NOAA 官方数据源实时拉取 Index" placement="top">
             <span>
-              <el-button type="warning" @click="openNoaaIndex">从 NOAA 自动拉取 Index</el-button>
+              <el-button type="warning" @click="openNoaaIndex">从 NOAA 官方拉取 Index</el-button>
             </span>
           </el-tooltip>
           <el-tooltip v-else content="该模型属于特定 AI 算法预测产物或置信区间，须使用【手动上传】" placement="top">
@@ -654,7 +659,15 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="noaaVisible" title="从 NOAA / 官方 自动拉取 Index" width="560px">
+    <el-dialog v-model="noaaVisible" title="从 NOAA 官方拉取 Index" width="560px">
+      <el-alert
+        v-if="query.dataset === 'ENSO'"
+        type="info"
+        :closable="false"
+        show-icon
+        title="注：ENSO 数据集在线自动拉取仅支持 NOAA 官方 Nino3.4 指数（nino34_asc），其余特定 AI 算法预测模型须使用【手动上传】功能。"
+        style="margin-bottom: 15px;"
+      />
       <el-form :model="noaaForm" label-width="130px">
         <el-form-item label="数据集">
           <el-input :value="query.dataset" disabled />
@@ -666,15 +679,14 @@ onMounted(async () => {
           <el-input v-model="noaaForm.month" placeholder="1-12" />
         </el-form-item>
         <el-form-item label="目标 var_model" required>
-          <el-select v-model="noaaForm.varModel" style="width: 100%">
+          <el-select v-model="noaaForm.varModel" :disabled="query.dataset === 'ENSO'" style="width: 100%">
             <el-option v-for="m in modelOptions" :key="m" :label="m" :value="m" />
           </el-select>
         </el-form-item>
         <el-form-item label="指数数据源">
           <el-select v-model="noaaForm.source" style="width: 100%">
-            <el-option label="NOAA CPC Monthly Index (NAO标准文本源)" value="noaa_cpc" />
-            <el-option label="NOAA ERSSTv5 Nino3.4 Index (ENSO海温源)" value="noaa_ersst" />
-            <el-option label="ERA5 Monthly Index (ECMWF导出的衍生源)" value="era5_derived" />
+            <el-option label="NOAA CPC 官方 Monthly Index (NAO 基准源)" value="noaa_cpc" />
+            <el-option label="NOAA ERSSTv5 Nino3.4 Index (ENSO 基准源)" value="noaa_ersst" />
           </el-select>
         </el-form-item>
         <el-form-item label="预报月数 (Months)">
