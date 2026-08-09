@@ -10,6 +10,8 @@ import SeaIce_ForecastExamination from '@/views/SeaIce/ForecastExamination.vue';
 import NAOForecastResult from '@/views/NAO/ForecastResult.vue';
 import NAOForecastExamination from '@/views/NAO/ForecastExamination.vue';
 
+import AdminLogin from '@/views/admin/AdminLogin.vue';
+import AdminForecastResultImagePublish from '@/views/admin/ForecastResultImagePublish.vue';
 import UserView from '@/views/user/UserView.vue'
 import AdminLogin from '@/views/admin/AdminLogin.vue'
 import AdminDashboard from '@/views/admin/AdminDashboard.vue'
@@ -97,19 +99,37 @@ const router = createRouter({
 
             ],
         },
+        {
+            name: 'AdminLogin',
+            path: '/admin/login',
+            component: AdminLogin,
+            meta: {
+                title: 'AdminLogin',
+            },
+        },
+        {
+            name: 'AdminForecastResultImagePublish',
+            path: '/admin/forecast-result-images/publish',
+            component: AdminForecastResultImagePublish,
+            meta: {
+                title: 'AdminForecastResultImagePublish',
+                requiresAdminAuth: true,
+            },
+        },
     ],
 })
 
-// 全局前置路由守卫：拦截未登录访问后台管理页面
-router.beforeEach((to, from, next) => {
-    if (to.meta.requiresAuth || (to.path.startsWith('/admin') && to.path !== '/admin/login')) {
-        const token = localStorage.getItem('admin_token')
-        if (!token) {
-            next({ name: 'AdminLogin' })
-            return
-        }
+router.beforeEach((to, _from, next) => {
+    // 检查是否需要认证：支持 requiresAuth 或 requiresAdminAuth
+    const needsAuth = to.meta.requiresAuth || to.meta.requiresAdminAuth;
+    if (needsAuth && !localStorage.getItem('tianxing_admin_token')) {
+        next({
+            name: 'AdminLogin',
+            query: { redirect: to.fullPath },
+        });
+        return;
     }
-    next()
-})
+    next();
+});
 
 export default router;

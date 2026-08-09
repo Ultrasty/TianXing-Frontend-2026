@@ -1,146 +1,225 @@
-<template>
-  <div class="login-container">
-    <div class="login-box">
-      <div class="login-header">
-        <h2 class="title">同济大学天行平台</h2>
-        <p class="subtitle">管理后台系统登录</p>
-      </div>
-
-      <el-form :model="loginForm" :rules="loginRules" ref="loginFormRef" class="login-form" @keyup.enter="handleLogin">
-        <el-form-item prop="userName">
-          <el-input v-model="loginForm.userName" placeholder="管理员账号 (admin)" prefix-icon="User" size="large" clearable />
-        </el-form-item>
-
-        <el-form-item prop="password">
-          <el-input v-model="loginForm.password" type="password" placeholder="管理员密码" prefix-icon="Lock" size="large" show-password clearable />
-        </el-form-item>
-
-        <el-form-item>
-          <el-button :loading="loading" type="primary" size="large" class="login-btn" @click="handleLogin">
-            {{ loading ? '登录验证中...' : '立 即 登 录' }}
-          </el-button>
-        </el-form-item>
-      </el-form>
-
-      <div class="login-footer">
-        <span>&copy; 2026 同济大学天行气象预测平台</span>
-      </div>
-    </div>
-  </div>
-</template>
-
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { User, Lock } from '@element-plus/icons-vue'
-import request from '@/utils/request'
+import { ArrowRight, Lock, User } from '@element-plus/icons-vue'
+import axios from 'axios'
+import adminRequest from '@/utils/adminRequest'
+import bg from '@/assets/bg.png'
+import logoImg from '@/assets/logo-img.png'
+import logoText from '@/assets/logo-txt-b.png'
 
 const router = useRouter()
-const loginFormRef = ref()
+const route = useRoute()
 const loading = ref(false)
+const apiBase = computed(() => import.meta.env.VITE_API_PREFIX || axios.defaults.baseURL || '未配置')
 
-const loginForm = reactive({
-  userName: '',
-  password: ''
+const form = reactive({
+  username: 'admin',
+  password: '',
 })
 
-const loginRules = {
-  userName: [{ required: true, message: '请输入管理员账号', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
-}
+async function submitLogin() {
+  if (!form.username.trim() || !form.password) {
+    ElMessage.warning('请输入用户名和密码')
+    return
+  }
 
-const handleLogin = async () => {
-  if (!loginFormRef.value) return
-  await loginFormRef.value.validate(async (valid: boolean) => {
-    if (!valid) return
-    loading.value = true
-    try {
-      const res = await request.post('/admin/login', {
-        data: {
-          userName: loginForm.userName,
-          password: loginForm.password
-        }
-      })
-
-      if (res && res.code === 200) {
-        ElMessage.success('登录成功！Welcome, ' + (res.data.nickName || res.data.userName))
-        localStorage.setItem('admin_token', res.data.token)
-        localStorage.setItem('admin_user', JSON.stringify(res.data))
-        router.push('/admin/dashboard')
-      } else {
-        ElMessage.error(res?.msg || '登录失败，请检查用户名和密码')
-      }
-    } catch (err: any) {
-      ElMessage.error(err?.data?.msg || err?.message || '网络异常，请确认后端服务已启动')
-    } finally {
-      loading.value = false
-    }
-  })
+  loading.value = true
+  try {
+    const response = await adminRequest.post('/admin/auth/login', {
+      username: form.username.trim(),
+      password: form.password,
+    })
+    const payload = response.data?.data || response.data
+    localStorage.setItem('tianxing_admin_token', payload.token)
+    localStorage.setItem('tianxing_admin_username', payload.username || form.username.trim())
+    ElMessage.success(response.data?.message || '登录成功')
+    const redirect = typeof route.query.redirect === 'string'
+      ? route.query.redirect
+      : '/admin/forecast-result-images/publish'
+    await router.push(redirect)
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.message || '登录失败')
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 
-<style scoped>
-.login-container {
+<template>
+  <main
+    class="admin-login"
+    :style="{ backgroundImage: `linear-gradient(120deg, rgba(5, 20, 38, 0.78), rgba(7, 41, 70, 0.42)), url(${bg})` }"
+  >
+    <section class="brand-panel">
+      <div class="brand-mark">
+        <img class="brand-logo" :src="logoImg" alt="天行" />
+        <img class="brand-text" :src="logoText" alt="天行气象预测平台" />
+      </div>
+      <h1>后台系统</h1>
+      <p>管理员登录</p>
+    </section>
+
+    <section class="login-panel" @keyup.enter="submitLogin">
+      <div class="login-heading">
+        <span>Admin</span>
+        <h2>进入管理后台</h2>
+      </div>
+
+      <el-form label-position="top">
+        <el-form-item label="用户名">
+          <el-input
+            v-model="form.username"
+            :prefix-icon="User"
+            autocomplete="username"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input
+            v-model="form.password"
+            :prefix-icon="Lock"
+            autocomplete="current-password"
+            show-password
+            type="password"
+          />
+        </el-form-item>
+        <el-button
+          class="login-button"
+          type="primary"
+          :icon="ArrowRight"
+          :loading="loading"
+          @click="submitLogin"
+        >
+          登录
+        </el-button>
+      </el-form>
+
+      <div class="api-line">
+        <span>API</span>
+        <code>{{ apiBase }}</code>
+      </div>
+    </section>
+  </main>
+</template>
+
+<style scoped lang="scss">
+.admin-login {
   min-height: 100vh;
-  display: flex;
-  justify-content: center;
+  display: grid;
+  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 460px);
+  gap: 42px;
   align-items: center;
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  padding: 56px 8vw;
   background-size: cover;
+  background-position: center;
+  color: #ffffff;
 }
 
-.login-box {
-  width: 420px;
-  padding: 40px;
-  background: rgba(30, 41, 59, 0.85);
-  backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 16px;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+.brand-panel {
+  max-width: 520px;
 }
 
-.login-header {
-  text-align: center;
-  margin-bottom: 32px;
+.brand-mark {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 34px;
 }
 
-.title {
-  color: #f8fafc;
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0 0 8px 0;
-  letter-spacing: 1px;
+.brand-logo {
+  width: 62px;
+  height: 62px;
+  object-fit: contain;
 }
 
-.subtitle {
-  color: #94a3b8;
-  font-size: 14px;
+.brand-text {
+  height: 44px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+}
+
+.brand-panel h1 {
+  margin: 0 0 14px;
+  font-size: 52px;
+  font-family: 'STXinwei', 'Microsoft YaHei', sans-serif;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.brand-panel p {
   margin: 0;
+  font-size: 20px;
+  color: rgba(255, 255, 255, 0.78);
 }
 
-.login-form {
-  margin-top: 20px;
-}
-
-.login-btn {
+.login-panel {
   width: 100%;
+  padding: 34px;
+  border: 1px solid rgba(45, 141, 210, 0.24);
   border-radius: 8px;
-  font-weight: 600;
-  font-size: 16px;
-  background: linear-gradient(90deg, #3b82f6 0%, #2563eb 100%);
-  border: none;
-  margin-top: 10px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 22px 52px rgba(3, 24, 43, 0.28);
+  color: #152033;
+  backdrop-filter: blur(10px);
 }
 
-.login-btn:hover {
-  opacity: 0.9;
+.login-heading {
+  margin-bottom: 26px;
 }
 
-.login-footer {
-  text-align: center;
-  margin-top: 24px;
-  color: #64748b;
+.login-heading span {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #2d8dd2;
+  font-weight: 700;
+}
+
+.login-heading h2 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+
+.login-button {
+  width: 100%;
+  height: 42px;
+  margin-top: 4px;
+}
+
+.api-line {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid #d9e8f3;
+  color: #667085;
   font-size: 12px;
+}
+
+.api-line span {
+  color: #2d8dd2;
+  font-weight: 700;
+}
+
+.api-line code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 860px) {
+  .admin-login {
+    grid-template-columns: 1fr;
+    padding: 32px 20px;
+  }
+
+  .brand-panel h1 {
+    font-size: 42px;
+  }
 }
 </style>
