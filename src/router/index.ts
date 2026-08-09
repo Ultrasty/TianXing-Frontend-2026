@@ -11,11 +11,26 @@ import NAOForecastResult from '@/views/NAO/ForecastResult.vue';
 import NAOForecastExamination from '@/views/NAO/ForecastExamination.vue';
 
 import UserView from '@/views/user/UserView.vue'
+import AdminLogin from '@/views/admin/AdminLogin.vue'
+import AdminDashboard from '@/views/admin/AdminDashboard.vue'
+
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const router = createRouter({
     history: createWebHashHistory('/tianxing'),
     routes: [
+        {
+            path: '/admin/login',
+            name: 'AdminLogin',
+            component: AdminLogin,
+            meta: { title: '管理员登录' }
+        },
+        {
+            path: '/admin/dashboard',
+            name: 'AdminDashboard',
+            component: AdminDashboard,
+            meta: { title: '管理后台概览', requiresAuth: true }
+        },
         {
             name: 'home',
             path: '/',
@@ -83,6 +98,18 @@ const router = createRouter({
             ],
         },
     ],
+})
+
+// 全局前置路由守卫：拦截未登录访问后台管理页面
+router.beforeEach((to, from, next) => {
+    if (to.meta.requiresAuth || (to.path.startsWith('/admin') && to.path !== '/admin/login')) {
+        const token = localStorage.getItem('admin_token')
+        if (!token) {
+            next({ name: 'AdminLogin' })
+            return
+        }
+    }
+    next()
 })
 
 export default router;
