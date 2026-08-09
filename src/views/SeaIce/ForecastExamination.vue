@@ -42,9 +42,170 @@ const selectedTime = computed({
 })
 const activeCharts = computed(() => tabCharts.value[chartSelected.value] || [])
 
-function toNumber(value) {
-  const number = Number(value)
-  return Number.isInteger(number) ? number : null
+const start_year1 = ref(null);
+const start_month1 = ref(null);
+const start_year2 = ref(null);
+const start_month2 = ref(null);
+const start_year3 = ref(null);
+const start_month3 = ref(null);
+
+const start_year = ref(2023);     //可选时间范围
+const end_year = ref(2023);
+const start_month = ref(1);     //可选时间范围
+const end_month = ref(1);
+
+const moveBoxLeft = computed(() => chartSelected.value * 250);
+const movBoxStyle = computed(() => ({
+  position: "absolute",
+  bottom: "0px",
+  left: `${moveBoxLeft.value}px`,
+  height: "2px",
+  width: "125px",
+  transform: "translateX(50%)",
+  backgroundColor: "rgb(143,178,201)",
+  transition: "left 0.3s ease"
+}));
+
+const limitedDateRange = (time) => {
+  return time.getFullYear() < start_year.value || time.getFullYear() > end_year.value;
+};
+const limitedDateRange2 = (time) => {
+  return ((time.getFullYear() < start_year.value || time.getFullYear() > end_year.value) && (time.getMonth() >= 0 && time.getMonth() <= 11)) || ((time.getFullYear() >= start_year.value && time.getFullYear() <= end_year.value) && ((time.getMonth() >= end_month.value && time.getMonth() <= 11)));
+};
+
+
+const SICChartErroPrediction = ref('这张图显示了2023年1月的4周SIC预测结果与基线方法的比较。预测结果始终优于persistence，在第28天，预测结果比persistence的RMSE低26.48%，证明了预测结果的有效性。')
+
+const SICChartErroAdd = ref('这张图显示了2022年里四种SIC预测结果提前1到7天的统计结果。MITgcm output (with DA) with BC显著降低了SIC的预测误差，RMSE一直低于0.09，更好地提高了SIC预报结果准确性。')
+
+const SIEChartErroAnalyse = ref('rmsd用来分析预报误差成因，其由偏差与方差两部分组成。从图b可以看出，除2020与2022年春季外，其他年份季节的rmsd主要由偏差构成，而从图d可知，当预报与观测之间的标准差偏差大时，对应了偏差的大值部分。而对于2020年与2022年春季的rmsd主要由方差构成，对应图c可知，当预报相关性系数较低时会造成较大的方差。')
+
+
+const chartTitle = ref('')
+chartTitle.value = `${selectedYear.value}年${selectedMonth.value}月 预测结果误差折线图`
+
+
+const chartTitle2 = ref('')
+chartTitle2.value = `${selectedYear.value}年${selectedMonth.value}月~${Number(selectedYear.value) + 1 + ''}年${selectedMonth.value}月 预测结果误差折线图`
+
+const chartTitle3 = ref('')
+chartTitle3.value = `${selectedYear.value}年SIC回报结果误差箱型图`
+
+const chartTitle4 = ref('')
+chartTitle4.value = `SIE预测误差分析`
+
+const option1 = ref({})
+const option2 = ref({})
+const option3 = ref({})
+const option4 = ref({})
+const option5 = ref({})
+const option6 = ref({})
+const option7 = ref({})
+
+
+const chartX = ref('')
+const chartX1 = ref('')
+chartX.value = [`${selectedYear.value}/${selectedMonth.value}/1`, `${selectedYear.value}/${selectedMonth.value}/2`, `${selectedYear.value}/${selectedMonth.value}/3`,
+`${selectedYear.value}/${selectedMonth.value}/4`, `${selectedYear.value}/${selectedMonth.value}/5`, `${selectedYear.value}/${selectedMonth.value}/6`,
+`${selectedYear.value}/${selectedMonth.value}/7`, `${selectedYear.value}/${selectedMonth.value}/8`, `${selectedYear.value}/${selectedMonth.value}/9`,
+`${selectedYear.value}/${selectedMonth.value}/10`, `${selectedYear.value}/${selectedMonth.value}/11`, `${selectedYear.value}/${selectedMonth.value}/12`,
+`${selectedYear.value}/${selectedMonth.value}/13`, `${selectedYear.value}/${selectedMonth.value}/14`, `${selectedYear.value}/${selectedMonth.value}/15`,
+`${selectedYear.value}/${selectedMonth.value}/16`, `${selectedYear.value}/${selectedMonth.value}/17`, `${selectedYear.value}/${selectedMonth.value}/18`,
+`${selectedYear.value}/${selectedMonth.value}/19`, `${selectedYear.value}/${selectedMonth.value}/20`, `${selectedYear.value}/${selectedMonth.value}/21`,
+`${selectedYear.value}/${selectedMonth.value}/22`, `${selectedYear.value}/${selectedMonth.value}/23`, `${selectedYear.value}/${selectedMonth.value}/24`,
+`${selectedYear.value}/${selectedMonth.value}/25`, `${selectedYear.value}/${selectedMonth.value}/26`, `${selectedYear.value}/${selectedMonth.value}/27`,]
+
+chartX1.value = [`${selectedYear.value - 2}spring`, `${selectedYear.value - 2}summer`, `${selectedYear.value - 2}fall`, `${selectedYear.value - 2}winter`,
+`${selectedYear.value - 1}spring`, `${selectedYear.value - 1}summer`, `${selectedYear.value - 1}fall`, `${selectedYear.value - 1}winter`,
+`${selectedYear.value}spring`, `${selectedYear.value}summer`, `${selectedYear.value}fall`, `${selectedYear.value}winter`
+]
+
+const updateTab1 = () => {
+  axios.get('/seaice/error?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
+    .then(response => {
+      console.log(response.data);
+      const baccKey = `${selectedYear.value}_BACC`;
+      const persistenceBaccKey = `${selectedYear.value}_per_BACC`;
+      const rmseKey = `${selectedYear.value}_RMSE`;
+      const persistenceRmseKey = `${selectedYear.value}_per_RMSE`;
+      const sampleCount = Math.max(response.data[baccKey]?.length || 0, response.data[rmseKey]?.length || 0);
+      const metricSamples = Array.from({ length: sampleCount }, (_, index) => `样本${index + 1}`);
+      const asPercent = (key) => (response.data[key] || []).map(value => value * 100);
+      option1.value = {
+        title: {
+          text: chartTitle.value,
+          left: 'center' //标题水平居中
+        },
+        tooltip: {},
+        xAxis: {
+          type: 'category',
+          name: '时间',
+          data: metricSamples
+        },
+        yAxis: {
+          type: 'value',
+          name: 'BACC(%)',
+          data: [10, 12, 14, 16, 18]
+        },
+        legend: { //图例
+          data: ['ours', 'persistence'],
+          orient: 'horizontal',
+          left: 'center',
+          bottom: '5',
+        },
+        series: [
+          {
+            name: 'ours',
+            type: 'line',
+            data: asPercent(baccKey),
+
+          },
+          {
+            name: 'persistence',
+            type: 'line',
+            data: asPercent(persistenceBaccKey),
+          },
+
+        ]
+      }
+
+      option2.value = {
+        tooltip: {},
+        xAxis: {
+          type: 'category',
+          name: '时间',
+          data: metricSamples
+        },
+        yAxis: {
+          type: 'value',
+          name: 'RMSE(%)',
+          data: [10, 12, 14, 16, 18]
+        },
+        legend: { //图例
+          data: ['ours', 'persistence'],
+          orient: 'horizontal',
+          left: 'center',
+          bottom: '5',
+        },
+        series: [
+          {
+            name: 'ours',
+            type: 'line',
+            data: asPercent(rmseKey),
+          },
+          {
+            name: 'persistence',
+            type: 'line',
+            data: asPercent(persistenceRmseKey),
+          },
+
+        ]
+      }
+      // SICChartErroPrediction.value = response.data.description;
+    })
+    .catch(error => {
+      console.error(error);
+    });
 }
 
 function createMonth(yearValue, monthValue = 1) {
@@ -54,8 +215,145 @@ function createMonth(yearValue, monthValue = 1) {
   return new Date(year, month - 1, 1)
 }
 
-function monthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+
+const updateTab3 = () => {
+  axios.get('/seaice/predictionExamination/errorAnalysis?year=' + Number(selectedYear.value))
+    .then(response => {
+      console.log(response.data);
+      option4.value = {
+        title: {
+          text: chartTitle4.value,
+          left: 'center' //标题水平居中
+        },
+        tooltip: {},
+        xAxis: {
+          type: 'category',
+          // name: '时间',
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
+        },
+        yAxis: {
+          type: 'value',
+          name: 'RMSD(million km²)',
+          data: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+        },
+        legend: { //图例
+          data: [''],
+          orient: 'horizontal',
+          left: 'center',
+          bottom: '5',
+        },
+        series: [
+          {
+            type: 'line',
+            data: response.data["RMSD"]
+          }
+        ]
+      }
+      option5.value = {
+        title: {
+          // text: chartTitle4.value,
+          left: 'center' //标题水平居中
+        },
+        tooltip: {},
+        xAxis: {
+          type: 'category',
+          // name: '时间',
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
+        },
+        yAxis: {
+          type: 'value',
+          name: 'RMSD²(million km²)',
+          data: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4, 1.6, 1.8]
+        },
+        legend: { //图例
+          data: ['bais', 'variance'],
+          orient: 'horizontal',
+          left: 'center',
+          bottom: '5',
+        },
+        series: [
+          {
+            name: 'bais',
+            type: 'bar',
+            data: response.data["BAIS"]
+          },
+          {
+            name: 'variance',
+            type: 'bar',
+            data: response.data["VAR"]
+          },
+
+        ]
+      }
+      option6.value = {
+        title: {
+          // text: chartTitle4.value,
+          left: 'center' //标题水平居中
+        },
+        tooltip: {},
+        xAxis: {
+          type: 'category',
+          // name: '时间',
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
+        },
+        yAxis: {
+          type: 'value',
+          name: 'Correlation coefficient',
+          data: [0.970, 0.975, 0.980, 0.985, 0.990, 0.995, 1.000]
+        },
+        legend: { //图例
+          data: [''],
+          orient: 'horizontal',
+          left: 'center',
+          bottom: '5',
+        },
+        series: [
+          {
+            type: 'line',
+            data: response.data["CORRELATION"]
+          }
+        ]
+      }
+
+      option7.value = {
+        title: {
+          // text: chartTitle4.value,
+          left: 'center' //标题水平居中
+        },
+        tooltip: {},
+        xAxis: {
+          type: 'category',
+          // name: '时间',
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
+        },
+        yAxis: {
+          type: 'value',
+          name: 'standard deviation(million km²)',
+          data: [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5]
+        },
+        legend: { //图例
+          data: ['observation', 'IceTFT'],
+          orient: 'horizontal',
+          left: 'center',
+          bottom: '5',
+        },
+        series: [
+          {
+            name: 'observation',
+            type: 'line',
+            data: response.data["OBS_STD"]
+          },
+          {
+            name: 'IceTFT',
+            type: 'line',
+            data: response.data["PRE_STD"]
+          }
+        ]
+      }
+    })
+    .catch(error => {
+      console.error(error);
+    });
 }
 
 function uniqueDates(dates, keyFunction) {
@@ -381,10 +679,6 @@ async function retryAvailability() {
   if (selectedTime.value) await updateChart()
 }
 
-const movBoxStyle = computed(() => ({
-  left: `${chartSelected.value * 250}px`,
-}))
-
 onMounted(async () => {
   await Promise.all([0, 1, 2].map(loadAvailability))
   if (selectedDates.value[0]) await updateChart(0)
@@ -555,65 +849,5 @@ onMounted(async () => {
   background: rgba(239, 242, 252, 0.8);
   border-radius: 8px;
   box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
-}
-
-.charts-shell {
-  min-height: 500px;
-  margin-top: 28px;
-  margin-bottom: 40px;
-}
-
-.charts-shell.has-state {
-  min-height: 260px;
-}
-
-.chart-container {
-  margin-bottom: 28px;
-  padding: 12px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
-}
-
-.chart {
-  height: 500px;
-}
-
-.state-panel {
-  display: flex;
-  width: min(560px, calc(100% - 48px));
-  margin: 0 auto;
-  padding: 28px;
-  box-sizing: border-box;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 16px;
-  background: rgba(250, 250, 250, 0.82);
-  border: 1px solid #ebeef5;
-  border-radius: 10px;
-}
-
-.state-panel :deep(.el-button) {
-  position: static;
-  width: auto;
-  min-width: 112px;
-  height: 38px;
-  align-self: center;
-  padding: 8px 20px;
-  font-size: 14px;
-  border-radius: 6px;
-}
-
-@media (max-width: 760px) {
-  .page-title {
-    margin-left: 8%;
-    font-size: 40px;
-  }
-
-  .content-shell,
-  .charts-shell {
-    margin-right: 4%;
-    margin-left: 4%;
-  }
 }
 </style>

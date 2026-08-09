@@ -95,7 +95,7 @@ const menus = ref([
       { title: '预测结果', name: 'SeaIce_ForecastResult' },
       { title: '预测检验', name: 'SeaIce_ForecastExamination' },
     ],
-  },
+  }
 ]);
 
 const nav_item_selected = ref<string | null>(null);
