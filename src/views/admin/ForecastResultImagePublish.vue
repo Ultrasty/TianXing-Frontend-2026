@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import type { AxiosProgressEvent } from 'axios'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Check, CopyDocument, Link, Refresh, SwitchButton, UploadFilled } from '@element-plus/icons-vue'
+import { Check, CopyDocument, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import adminRequest from '@/utils/adminRequest'
 import bg from '@/assets/bg.png'
 import logoImg from '@/assets/logo-img.png'
@@ -26,6 +27,21 @@ interface PublishedResponse {
   verifyPath?: string | null
 }
 
+interface PreviewFile {
+  uid: string
+  name: string
+  size: string
+  url: string
+  revoke: boolean
+}
+
+interface RemoteUrlCheck {
+  value: string
+  valid: boolean
+  source: string
+  message: string
+}
+
 const fallbackTypeOptions: ImageTypeOption[] = [
   { label: 'ENSO ASC', value: 'ENSO_ASC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
   { label: 'ENSO MC', value: 'ENSO_MC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
@@ -38,6 +54,14 @@ const fallbackTypeOptions: ImageTypeOption[] = [
   { label: '全球天气 U10', value: 'WEA_U10', period: '日', requiresDay: true, description: '10 米风预测结果图' },
 ]
 
+const remoteSourceOptions = [
+  { label: 'ECMWF Charts', value: 'ecmwf', keyword: 'ecmwf', hint: 'charts.ecmwf.int' },
+  { label: 'Copernicus', value: 'copernicus', keyword: 'copernicus', hint: 'copernicus' },
+]
+const allowedImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const allowedImagePattern = /\.(png|jpe?g|webp|gif)$/i
+const maxImageSize = 50 * 1024 * 1024
+
 const router = useRouter()
 const loading = ref(false)
 const typeLoading = ref(false)
@@ -45,10 +69,14 @@ const typeLoadFailed = ref(false)
 const fileList = ref<any[]>([])
 const imageTypeOptions = ref<ImageTypeOption[]>(fallbackTypeOptions)
 const published = ref<PublishedResponse | null>(null)
+const lastError = ref('')
+const progressPercent = ref(0)
+const manualPreviews = ref<PreviewFile[]>([])
 const currentAdmin = computed(() => localStorage.getItem('tianxing_admin_username') || 'admin')
 
 const form = reactive<{
   source: 'manual' | 'ecmwf'
+  remoteSource: 'ecmwf' | 'copernicus'
   type: string
   year: number
   month: number
@@ -56,6 +84,7 @@ const form = reactive<{
   imageUrls: string
 }>({
   source: 'manual',
+  remoteSource: 'ecmwf',
   type: 'ENSO_ASC',
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
@@ -64,20 +93,26 @@ const form = reactive<{
 })
 
 const selectedType = computed(() => imageTypeOptions.value.find((item) => item.value === form.type))
+const selectedRemoteSource = computed(() => remoteSourceOptions.find((item) => item.value === form.remoteSource))
 const requiresDay = computed(() => selectedType.value?.requiresDay || false)
-const selectedFiles = computed(() => fileList.value.map((file) => ({
-  name: file.name,
-  size: formatSize(file.size),
-})))
 const imageUrlCount = computed(() => parseImageUrls(form.imageUrls).length)
+const remoteUrlChecks = computed(() => parseImageUrls(form.imageUrls).map(validateRemoteUrl))
+const remoteUrlErrors = computed(() => remoteUrlChecks.value.filter((item) => !item.valid))
 const targetSummary = computed(() => {
   const date = requiresDay.value
     ? `${form.year}年${form.month}月${form.day || '-'}日`
     : `${form.year}年${form.month}月`
   return `${selectedType.value?.label || form.type} / ${date}`
 })
+const progressText = computed(() => {
+  if (form.source === 'manual') {
+    return progressPercent.value >= 100 ? '图片上传完成' : '正在上传图片'
+  }
+  return progressPercent.value >= 100 ? '远程图片拉取完成' : '后端正在拉取远程图片'
+})
 
 onMounted(fetchTypeOptions)
+onBeforeUnmount(releaseManualPreviews)
 
 watch(
   () => form.type,
@@ -91,6 +126,25 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  fileList,
+  (files) => {
+    releaseManualPreviews()
+    manualPreviews.value = files.map((file) => {
+      const raw = file.raw
+      const url = raw ? URL.createObjectURL(raw) : (file.url || '')
+      return {
+        uid: String(file.uid || file.name),
+        name: file.name,
+        size: formatSize(file.size),
+        url,
+        revoke: Boolean(raw && url),
+      }
+    })
+  },
+  { deep: true },
 )
 
 async function fetchTypeOptions() {
@@ -116,6 +170,54 @@ function parseImageUrls(value: string) {
     .filter(Boolean)
 }
 
+function validateRemoteUrl(value: string): RemoteUrlCheck {
+  try {
+    const url = new URL(value)
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      return { value, valid: false, source: '-', message: '仅支持 HTTP/HTTPS 地址' }
+    }
+
+    const host = url.hostname.toLowerCase()
+    const option = selectedRemoteSource.value
+    if (!option || !host.includes(option.keyword)) {
+      return {
+        value,
+        valid: false,
+        source: host || '-',
+        message: `当前来源应包含 ${option?.hint || 'ECMWF/Copernicus'} 域名`,
+      }
+    }
+
+    return {
+      value,
+      valid: true,
+      source: option.label,
+      message: '地址可提交',
+    }
+  } catch (_error) {
+    return { value, valid: false, source: '-', message: '地址格式不正确' }
+  }
+}
+
+function validateSelectedFiles() {
+  const invalid = fileList.value.find((file) => {
+    const type = file.raw?.type
+    return !(allowedImageTypes.includes(type) || allowedImagePattern.test(file.name))
+  })
+  if (invalid) {
+    ElMessage.warning(`仅支持 PNG / JPG / WebP / GIF：${invalid.name}`)
+    return false
+  }
+
+  const oversized = fileList.value.find((file) => file.size > maxImageSize)
+  if (oversized) {
+    ElMessage.warning(`单张图片不能超过 50MB：${oversized.name}`)
+    return false
+  }
+
+  return true
+}
+
 function validateForm() {
   if (!form.year || !form.month || !form.type) {
     ElMessage.warning('请填写年份、月份和类型')
@@ -129,8 +231,15 @@ function validateForm() {
     ElMessage.warning('请选择图片文件')
     return false
   }
+  if (form.source === 'manual' && !validateSelectedFiles()) {
+    return false
+  }
   if (form.source === 'ecmwf' && imageUrlCount.value === 0) {
     ElMessage.warning('请填写 ECMWF 图片地址')
+    return false
+  }
+  if (form.source === 'ecmwf' && remoteUrlErrors.value.length > 0) {
+    ElMessage.warning(remoteUrlErrors.value[0].message)
     return false
   }
   return true
@@ -142,19 +251,28 @@ async function submitPublish() {
   }
 
   loading.value = true
+  lastError.value = ''
+  progressPercent.value = form.source === 'manual' ? 0 : 18
   published.value = null
   try {
     const response = form.source === 'manual'
       ? await publishManual()
       : await publishFromEcmwf()
     published.value = response.data?.data || response.data
+    progressPercent.value = 100
     ElMessage.success(response.data?.message || '发布成功')
     fileList.value = []
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.response?.data?.error || '发布失败')
+    lastError.value = error?.response?.data?.message || error?.response?.data?.error || '发布失败'
+    progressPercent.value = 0
+    ElMessage.error(lastError.value)
   } finally {
     loading.value = false
   }
+}
+
+function retryPublish() {
+  submitPublish()
 }
 
 function publishManual() {
@@ -170,10 +288,13 @@ function publishManual() {
       data.append('files', file.raw)
     }
   })
-  return adminRequest.post('/admin/forecast-result-images/manual', data)
+  return adminRequest.post('/admin/forecast-result-images/manual', data, {
+    onUploadProgress: updateUploadProgress,
+  })
 }
 
 function publishFromEcmwf() {
+  progressPercent.value = 36
   return adminRequest.post('/admin/forecast-result-images/ecmwf', {
     year: String(form.year),
     month: String(form.month),
@@ -181,6 +302,14 @@ function publishFromEcmwf() {
     type: form.type,
     imageUrls: parseImageUrls(form.imageUrls),
   })
+}
+
+function updateUploadProgress(event: AxiosProgressEvent) {
+  if (!event.total) {
+    progressPercent.value = Math.max(progressPercent.value, 12)
+    return
+  }
+  progressPercent.value = Math.min(95, Math.max(1, Math.round((event.loaded * 100) / event.total)))
 }
 
 async function logout() {
@@ -214,6 +343,15 @@ function formatSize(size?: number) {
     return `${Math.round(size / 1024)} KB`
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`
+}
+
+function releaseManualPreviews() {
+  manualPreviews.value.forEach((file) => {
+    if (file.revoke) {
+      URL.revokeObjectURL(file.url)
+    }
+  })
+  manualPreviews.value = []
 }
 </script>
 
@@ -288,11 +426,22 @@ function formatSize(size?: number) {
       <section class="publish-panel">
         <el-form label-position="top">
           <div class="form-grid">
-            <el-form-item label="来源">
+          <el-form-item label="来源">
               <el-radio-group v-model="form.source">
                 <el-radio-button label="manual">手动上传</el-radio-button>
                 <el-radio-button label="ecmwf">ECMWF 拉取</el-radio-button>
               </el-radio-group>
+            </el-form-item>
+
+            <el-form-item v-if="form.source === 'ecmwf'" label="远程来源">
+              <el-select v-model="form.remoteSource">
+                <el-option
+                  v-for="item in remoteSourceOptions"
+                  :key="item.value"
+                  :label="item.label"
+                  :value="item.value"
+                />
+              </el-select>
             </el-form-item>
 
             <el-form-item label="图片类型">
@@ -325,6 +474,7 @@ function formatSize(size?: number) {
               class="admin-upload"
               accept="image/png,image/jpeg,image/webp,image/gif"
               :auto-upload="false"
+              :show-file-list="false"
               drag
               multiple
             >
@@ -345,12 +495,48 @@ function formatSize(size?: number) {
             />
           </el-form-item>
 
-          <div v-if="selectedFiles.length" class="file-list">
-            <div v-for="file in selectedFiles" :key="file.name" class="file-row">
-              <Check />
-              <span>{{ file.name }}</span>
-              <small>{{ file.size }}</small>
+          <div v-if="manualPreviews.length" class="preview-grid">
+            <article v-for="file in manualPreviews" :key="file.uid" class="preview-card">
+              <img :src="file.url" :alt="file.name" />
+              <div class="preview-meta">
+                <strong>{{ file.name }}</strong>
+                <small>{{ file.size }}</small>
+              </div>
+            </article>
+          </div>
+
+          <div v-if="remoteUrlChecks.length" class="url-check-list">
+            <div
+              v-for="(item, index) in remoteUrlChecks"
+              :key="`${item.value}-${index}`"
+              class="url-check-row"
+              :class="{ 'is-valid': item.valid, 'is-error': !item.valid }"
+            >
+              <component :is="item.valid ? Check : WarningFilled" />
+              <div>
+                <strong>{{ item.source }}</strong>
+                <p>{{ item.value }}</p>
+                <small>{{ item.message }}</small>
+              </div>
             </div>
+          </div>
+
+          <div v-if="loading || progressPercent > 0" class="publish-progress">
+            <el-progress
+              :percentage="progressPercent"
+              :indeterminate="loading && form.source === 'ecmwf'"
+              :status="progressPercent >= 100 ? 'success' : undefined"
+            />
+            <span>{{ progressText }}</span>
+          </div>
+
+          <div v-if="lastError" class="error-panel">
+            <WarningFilled />
+            <div>
+              <strong>发布失败</strong>
+              <p>{{ lastError }}</p>
+            </div>
+            <el-button text type="primary" :icon="Refresh" :disabled="loading" @click="retryPublish">重试</el-button>
           </div>
 
           <div class="actions">
@@ -645,6 +831,143 @@ function formatSize(size?: number) {
 
 .file-row small {
   color: #667085;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 4px 0 18px;
+}
+
+.preview-card {
+  overflow: hidden;
+  border: 1px solid #d7e6f1;
+  border-radius: 8px;
+  background: #f8fbfd;
+  box-shadow: 0 8px 20px rgba(19, 50, 76, 0.08);
+}
+
+.preview-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: #dfeaf3;
+}
+
+.preview-meta {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 12px;
+}
+
+.preview-meta strong,
+.preview-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-meta small {
+  color: #667085;
+}
+
+.url-check-list {
+  display: grid;
+  gap: 10px;
+  margin: 2px 0 18px;
+}
+
+.url-check-row {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f7fafc;
+  border: 1px solid #e1ebf3;
+}
+
+.url-check-row svg {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+}
+
+.url-check-row.is-valid svg {
+  color: #16835f;
+}
+
+.url-check-row.is-error svg {
+  color: #c83e4d;
+}
+
+.url-check-row strong,
+.url-check-row p,
+.url-check-row small {
+  display: block;
+  margin: 0;
+}
+
+.url-check-row strong {
+  margin-bottom: 4px;
+}
+
+.url-check-row p {
+  color: #344054;
+  word-break: break-all;
+}
+
+.url-check-row small {
+  margin-top: 4px;
+  color: #667085;
+}
+
+.publish-progress {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid #dbe7f1;
+  border-radius: 8px;
+  background: #f7fbfe;
+}
+
+.publish-progress span {
+  color: #667085;
+  font-size: 13px;
+}
+
+.error-panel {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #f3c1c7;
+  border-radius: 8px;
+  background: #fff5f6;
+  color: #9f1d2d;
+}
+
+.error-panel svg {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+}
+
+.error-panel strong,
+.error-panel p {
+  margin: 0;
+}
+
+.error-panel p {
+  margin-top: 4px;
+  color: #aa3141;
+  word-break: break-all;
 }
 
 .actions {

@@ -15,6 +15,8 @@ import AdminForecastResultImagePublish from '@/views/admin/ForecastResultImagePu
 import UserView from '@/views/user/UserView.vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 
+const adminAuthBypass = import.meta.env.VITE_ADMIN_AUTH_BYPASS === 'true'
+
 const router = createRouter({
     history: createWebHashHistory('/tianxing'),
     routes: [
@@ -105,6 +107,11 @@ const router = createRouter({
 })
 
 router.beforeEach((to, _from, next) => {
+    if (adminAuthBypass && to.meta.requiresAdminAuth) {
+        localStorage.setItem('tianxing_admin_username', 'local-bypass')
+        next();
+        return;
+    }
     if (to.meta.requiresAdminAuth && !localStorage.getItem('tianxing_admin_token')) {
         next({
             name: 'AdminLogin',
