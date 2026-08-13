@@ -35,24 +35,21 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { getAdminUsername, clearAdminSession } from '@/utils/adminAuth'
 
 const router = useRouter()
 const userInfo = ref<any>(null)
 
 onMounted(() => {
-  const userStr = localStorage.getItem('admin_user')
-  if (userStr) {
-    try {
-      userInfo.value = JSON.parse(userStr)
-    } catch (e) {
-      userInfo.value = null
-    }
+  const username = getAdminUsername() || 'admin'
+  userInfo.value = {
+    userName: username,
+    nickName: username === 'admin' ? '天行管理员' : username,
   }
 })
 
 const handleLogout = () => {
-  localStorage.removeItem('admin_token')
-  localStorage.removeItem('admin_user')
+  clearAdminSession()
   ElMessage.info('已退出登录')
   router.push('/admin/login')
 }

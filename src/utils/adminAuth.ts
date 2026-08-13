@@ -16,6 +16,10 @@ export function getAdminToken(): string | null {
   return localStorage.getItem(TOKEN_KEY) || localStorage.getItem(LEGACY_TOKEN_KEY)
 }
 
+export function getAdminUsername(): string | null {
+  return localStorage.getItem(LEGACY_USER_KEY)
+}
+
 export function clearAdminSession() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(EXPIRES_AT_KEY)
