@@ -4,10 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowRight, Lock, User } from '@element-plus/icons-vue'
 import axios from 'axios'
-import adminRequest from '@/utils/adminRequest'
+import { adminHttp } from '@/api/admin'
 import bg from '@/assets/bg.png'
 import logoImg from '@/assets/logo-img.png'
 import logoText from '@/assets/logo-txt-b.png'
+
+import { saveAdminSession } from '@/utils/adminAuth'
 
 const router = useRouter()
 const route = useRoute()
@@ -27,17 +29,18 @@ async function submitLogin() {
 
   loading.value = true
   try {
-    const response = await adminRequest.post('/admin/auth/login', {
+    const response = await adminHttp.post('/admin/auth/login', {
       username: form.username.trim(),
       password: form.password,
     })
     const payload = response.data?.data || response.data
+    saveAdminSession(payload.token, payload.expiresIn || 28800)
     localStorage.setItem('tianxing_admin_token', payload.token)
     localStorage.setItem('tianxing_admin_username', payload.username || form.username.trim())
     ElMessage.success(response.data?.message || '登录成功')
     const redirect = typeof route.query.redirect === 'string'
       ? route.query.redirect
-      : '/admin/forecast-result-images/publish'
+      : '/admin/evaluations'
     await router.push(redirect)
   } catch (error: any) {
     ElMessage.error(error?.response?.data?.message || '登录失败')
