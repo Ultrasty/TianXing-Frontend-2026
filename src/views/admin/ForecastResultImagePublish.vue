@@ -2,8 +2,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Check, CopyDocument, Link, Refresh, SwitchButton, UploadFilled } from '@element-plus/icons-vue'
-import adminRequest from '@/utils/adminRequest'
+import { adminHttp } from '@/api/admin'
+import { clearAdminSession } from '@/utils/adminAuth'
 import bg from '@/assets/bg.png'
 import logoImg from '@/assets/logo-img.png'
 import logoText from '@/assets/logo-txt-b.png'
@@ -97,7 +97,7 @@ async function fetchTypeOptions() {
   typeLoading.value = true
   typeLoadFailed.value = false
   try {
-    const response = await adminRequest.get('/admin/forecast-result-images/types')
+    const response = await adminHttp.get('/admin/forecast-result-images/types')
     const payload = response.data?.data || response.data
     if (Array.isArray(payload) && payload.length > 0) {
       imageTypeOptions.value = payload
@@ -170,11 +170,11 @@ function publishManual() {
       data.append('files', file.raw)
     }
   })
-  return adminRequest.post('/admin/forecast-result-images/manual', data)
+  return adminHttp.post('/admin/forecast-result-images/manual', data)
 }
 
 function publishFromEcmwf() {
-  return adminRequest.post('/admin/forecast-result-images/ecmwf', {
+  return adminHttp.post('/admin/forecast-result-images/ecmwf', {
     year: String(form.year),
     month: String(form.month),
     day: requiresDay.value && form.day ? String(form.day) : undefined,
@@ -185,12 +185,11 @@ function publishFromEcmwf() {
 
 async function logout() {
   try {
-    await adminRequest.post('/admin/auth/logout')
+    await adminHttp.post('/admin/auth/logout')
   } catch (_error) {
     // Local logout still clears expired or unreachable sessions.
   }
-  localStorage.removeItem('tianxing_admin_token')
-  localStorage.removeItem('tianxing_admin_username')
+  clearAdminSession()
   router.push('/admin/login')
 }
 
@@ -229,6 +228,9 @@ function formatSize(size?: number) {
         <span>后台系统</span>
       </div>
       <div class="admin-actions">
+        <el-button size="small" @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
+        <el-button size="small" type="primary">🖼️ 结果图发布</el-button>
+        <el-button size="small" @click="router.push({ name: 'home' })">🏠 公开站点</el-button>
         <span>{{ currentAdmin }}</span>
         <el-button :icon="SwitchButton" text @click="logout">退出</el-button>
       </div>

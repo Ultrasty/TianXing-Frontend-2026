@@ -1,4 +1,4 @@
-import axios, { AxiosError } from 'axios'
+import axios, { AxiosError, AxiosHeaders } from 'axios'
 import { clearAdminSession, getAdminToken } from '@/utils/adminAuth'
 
 export type EvaluationCategory = 'ENSO' | 'NAO' | 'SIC' | 'SIE'
@@ -134,14 +134,16 @@ export interface NsidcEvaluationResult {
 const defaultBaseUrl = import.meta.env.DEV ? 'http://localhost:8888' : '/api'
 
 export const adminHttp = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || defaultBaseUrl,
+  baseURL: import.meta.env.VITE_API_PREFIX || import.meta.env.VITE_API_BASE_URL || axios.defaults.baseURL || defaultBaseUrl,
   timeout: 300_000,
 })
 
 adminHttp.interceptors.request.use((config) => {
   const token = getAdminToken()
   if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+    const headers = AxiosHeaders.from(config.headers)
+    headers.set('Authorization', `Bearer ${token}`)
+    config.headers = headers
   }
   return config
 })
