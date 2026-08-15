@@ -665,7 +665,7 @@ onMounted(async () => {
         type="info"
         :closable="false"
         show-icon
-        title="注：ENSO 数据集在线自动拉取仅支持 NOAA 官方 Nino3.4 指数（nino34_asc），其余特定 AI 算法预测模型须使用【手动上传】功能。"
+        title="注：ENSO 数据集在线自动拉取仅支持 NOAA 官方 Nino3.4 指数（nino34_asc），其余特定 AI 算法预测模型须使用【手动上传】功能。拉取返回自目标月起已发布的真实观测距平序列（最多 12 个月），近期月份可能不足或暂无数据。"
         style="margin-bottom: 15px;"
       />
       <el-form :model="noaaForm" label-width="130px">
@@ -686,7 +686,7 @@ onMounted(async () => {
         <el-form-item label="指数数据源">
           <el-select v-model="noaaForm.source" style="width: 100%">
             <el-option label="NOAA CPC 官方 Monthly Index (NAO 基准源)" value="noaa_cpc" />
-            <el-option label="NOAA ERSSTv5 Nino3.4 Index (ENSO 基准源)" value="noaa_ersst" />
+            <el-option label="NOAA ERSSTv6 Nino3.4 Index (ENSO 基准源)" value="noaa_ersst" />
           </el-select>
         </el-form-item>
         <el-form-item label="预报月数 (Months)">
