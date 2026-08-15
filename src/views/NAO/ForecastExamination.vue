@@ -15,7 +15,7 @@ const descriptions = [
 ]
 
 const selectedDate = ref(null)
-const dateRange = ref({ start: null, end: null })
+const availableMonths = ref([])
 const modalImages = ref([])
 const modalImageIndex = ref(0)
 const correlationOption = ref({})
@@ -26,6 +26,7 @@ const requestIds = [0, 0]
 const currentModalImage = computed(() => (
   resolveImageUrl(modalImages.value[modalImageIndex.value])
 ))
+const availableMonthKeys = computed(() => new Set(availableMonths.value.map(monthKey)))
 const hasCorrelationData = computed(() => (
   Object.keys(correlationOption.value || {}).length > 0
 ))
@@ -43,15 +44,22 @@ function createMonth(yearValue, monthValue) {
   return new Date(year, month - 1, 1)
 }
 
-function monthNumber(date) {
-  return date.getFullYear() * 12 + date.getMonth()
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function normalizeAvailableMonths(data) {
+  const candidates = Array.isArray(data?.availableMonths)
+    ? data.availableMonths.map((item) => createMonth(item?.year, item?.month))
+    : [createMonth(data?.end_year, data?.end_month)]
+  const unique = new Map()
+
+  candidates.filter(Boolean).forEach((date) => unique.set(monthKey(date), date))
+  return [...unique.values()].sort((left, right) => left.getTime() - right.getTime())
 }
 
 function limitedDateRange(time) {
-  if (!dateRange.value.start || !dateRange.value.end) return false
-  const value = monthNumber(time)
-  return value < monthNumber(dateRange.value.start)
-    || value > monthNumber(dateRange.value.end)
+  return !availableMonthKeys.value.has(monthKey(time))
 }
 
 function normalizeImages(value) {
@@ -70,21 +78,19 @@ async function initializeModal() {
     const response = await axios.get('/nao/initialize/naoCORR')
     if (requestId !== requestIds[0]) return
 
-    const start = createMonth(response.data?.start_year, response.data?.start_month)
-    const end = createMonth(response.data?.end_year, response.data?.end_month)
-    if (!start || !end || monthNumber(start) > monthNumber(end)) {
-      throw new Error('Invalid NAO examination date range')
-    }
+    const normalizedMonths = normalizeAvailableMonths(response.data)
+    if (normalizedMonths.length === 0) throw new Error('Empty NAO examination month list')
     const images = normalizeImages(response.data?.data)
     if (images.length === 0) throw new Error('Empty NAO examination image list')
 
-    dateRange.value = { start, end }
-    selectedDate.value = new Date(end)
+    availableMonths.value = normalizedMonths
+    selectedDate.value = new Date(normalizedMonths[normalizedMonths.length - 1])
     modalImages.value = images
     preloadImages(images)
   } catch (error) {
     if (requestId !== requestIds[0]) return
-    dateRange.value = { start: null, end: null }
+    availableMonths.value = []
+    selectedDate.value = null
     errors.value[0] = requestErrorMessage(error, 'NAO 模态检验初始化失败')
   } finally {
     if (requestId === requestIds[0]) loading.value[0] = false
@@ -148,7 +154,7 @@ async function loadCorrelation() {
 function selectChart(index) {
   chartSelected.value = index
   if (index === 0 && modalImages.value.length === 0 && !loading.value[0]) {
-    dateRange.value.start ? loadModal() : initializeModal()
+    availableMonths.value.length ? loadModal() : initializeModal()
   } else if (index === 1 && !hasCorrelationData.value && !loading.value[1]) {
     loadCorrelation()
   }
@@ -156,12 +162,13 @@ function selectChart(index) {
 
 function handleDateChange() {
   document.activeElement?.blur()
+  if (!selectedDate.value || limitedDateRange(selectedDate.value)) return
   loadModal()
 }
 
 function retryActive() {
   if (chartSelected.value === 1) return loadCorrelation()
-  return dateRange.value.start ? loadModal() : initializeModal()
+  return availableMonths.value.length ? loadModal() : initializeModal()
 }
 
 function changeImageIndex(direction) {
@@ -209,7 +216,7 @@ onMounted(() => {
           v-model="selectedDate"
           type="month"
           :clearable="false"
-          :disabled="loading[0] && !dateRange.start"
+          :disabled="loading[0] && availableMonths.length === 0"
           :disabled-date="limitedDateRange"
           @change="handleDateChange"
         />
@@ -401,7 +408,7 @@ onMounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 20px clamp(88px, 12%, 160px);
 }
 
 .picture-container h2,
@@ -471,6 +478,11 @@ onMounted(() => {
   .chart-selector {
     margin-right: 4%;
     margin-left: 4%;
+  }
+
+  .picture-container {
+    padding-right: 56px;
+    padding-left: 56px;
   }
 }
 </style>

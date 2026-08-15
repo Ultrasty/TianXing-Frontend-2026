@@ -11,10 +11,7 @@ const chartNames = ['指数预测', '模态预测']
 const chartSelected = ref(0)
 
 const selectedDates = ref([null, null])
-const dateRanges = ref([
-  { start: null, end: null },
-  { start: null, end: null },
-])
+const availableMonths = ref([[], []])
 const loading = ref([false, false])
 const errors = ref(['', ''])
 const requestIds = [0, 0]
@@ -30,7 +27,10 @@ const currentDate = computed({
     selectedDates.value[chartSelected.value] = value
   },
 })
-const activeRange = computed(() => dateRanges.value[chartSelected.value])
+const activeAvailableMonths = computed(() => availableMonths.value[chartSelected.value])
+const activeAvailableMonthKeys = computed(() => (
+  new Set(activeAvailableMonths.value.map(monthKey))
+))
 const hasNaoiData = computed(() => Object.keys(naoiOption.value || {}).length > 0)
 const currentSlpImage = computed(() => resolveImageUrl(slpImages.value[slpImageIndex.value]))
 const slpTitle = computed(() => {
@@ -48,24 +48,30 @@ function createMonth(yearValue, monthValue) {
   return new Date(year, month - 1, 1)
 }
 
-function monthNumber(date) {
-  return date.getFullYear() * 12 + date.getMonth()
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
+
+function normalizeAvailableMonths(data) {
+  const candidates = Array.isArray(data?.availableMonths)
+    ? data.availableMonths.map((item) => createMonth(item?.year, item?.month))
+    : [createMonth(data?.end_year, data?.end_month)]
+  const unique = new Map()
+
+  candidates.filter(Boolean).forEach((date) => unique.set(monthKey(date), date))
+  return [...unique.values()].sort((left, right) => left.getTime() - right.getTime())
 }
 
 function limitedDateRange(time) {
-  const range = activeRange.value
-  if (!range?.start || !range?.end) return false
-  const value = monthNumber(time)
-  return value < monthNumber(range.start) || value > monthNumber(range.end)
+  return !activeAvailableMonthKeys.value.has(monthKey(time))
 }
 
-function setRange(index, data) {
-  const start = createMonth(data?.start_year, data?.start_month)
-  const end = createMonth(data?.end_year, data?.end_month)
-  if (!start || !end || monthNumber(start) > monthNumber(end)) {
-    throw new Error('Invalid NAO date range')
-  }
-  dateRanges.value[index] = { start, end }
+function setAvailability(index, data) {
+  const normalized = normalizeAvailableMonths(data)
+  if (normalized.length === 0) throw new Error('Empty NAO available month list')
+
+  const end = normalized[normalized.length - 1]
+  availableMonths.value[index] = normalized
   selectedDates.value[index] = new Date(end)
 }
 
@@ -79,7 +85,7 @@ async function initializeNaoi() {
   try {
     const response = await axios.get('/nao/initialize/naoPrediction')
     if (requestId !== requestIds[0]) return
-    setRange(0, response.data)
+    setAvailability(0, response.data)
 
     if (
       !response.data?.option
@@ -92,7 +98,8 @@ async function initializeNaoi() {
     naoiDescription.value = response.data.description || ''
   } catch (error) {
     if (requestId !== requestIds[0]) return
-    dateRanges.value[0] = { start: null, end: null }
+    availableMonths.value[0] = []
+    selectedDates.value[0] = null
     errors.value[0] = requestErrorMessage(error, 'NAO 指数预测初始化失败')
   } finally {
     if (requestId === requestIds[0]) loading.value[0] = false
@@ -109,7 +116,7 @@ async function initializeSlp() {
   try {
     const response = await axios.get('/nao/initialize/naoGrid')
     if (requestId !== requestIds[1]) return
-    setRange(1, response.data)
+    setAvailability(1, response.data)
 
     const images = Array.isArray(response.data?.data)
       ? response.data.data.filter((item) => typeof item === 'string' && item)
@@ -119,7 +126,8 @@ async function initializeSlp() {
     preloadImages(images)
   } catch (error) {
     if (requestId !== requestIds[1]) return
-    dateRanges.value[1] = { start: null, end: null }
+    availableMonths.value[1] = []
+    selectedDates.value[1] = null
     errors.value[1] = requestErrorMessage(error, 'NAO 模态预测初始化失败')
   } finally {
     if (requestId === requestIds[1]) loading.value[1] = false
@@ -195,6 +203,7 @@ async function updateSlp() {
 
 function handleDateChange() {
   document.activeElement?.blur()
+  if (!currentDate.value || limitedDateRange(currentDate.value)) return
   if (chartSelected.value === 0) updateNaoi()
   else updateSlp()
 }
@@ -204,7 +213,7 @@ function selectChart(index) {
 }
 
 function retryActive() {
-  if (!activeRange.value?.start) {
+  if (activeAvailableMonths.value.length === 0) {
     return chartSelected.value === 0 ? initializeNaoi() : initializeSlp()
   }
   return chartSelected.value === 0 ? updateNaoi() : updateSlp()
@@ -255,7 +264,7 @@ onMounted(() => {
           v-model="currentDate"
           type="month"
           :clearable="false"
-          :disabled="loading[chartSelected] && !activeRange.start"
+          :disabled="loading[chartSelected] && activeAvailableMonths.length === 0"
           :disabled-date="limitedDateRange"
           @change="handleDateChange"
         />
@@ -426,11 +435,13 @@ onMounted(() => {
 .picture-container {
   position: relative;
   display: flex;
+  width: 100%;
   min-height: 500px;
+  box-sizing: border-box;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 20px clamp(88px, 12%, 160px);
   overflow: hidden;
 }
 
@@ -498,6 +509,11 @@ onMounted(() => {
   .chart-selector {
     margin-right: 4%;
     margin-left: 4%;
+  }
+
+  .picture-container {
+    padding-right: 56px;
+    padding-left: 56px;
   }
 }
 </style>
