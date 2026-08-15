@@ -75,13 +75,19 @@ const manualPreviews = ref<PreviewFile[]>([])
 const currentAdmin = computed(() => localStorage.getItem('tianxing_admin_username') || 'admin')
 
 const form = reactive<{
-  source: 'manual' | 'ecmwf'
+  source: 'manual' | 'ecmwfRaw' | 'ecmwfUrl'
   remoteSource: 'ecmwf' | 'copernicus'
   type: string
   year: number
   month: number
   day: number | undefined
   imageUrls: string
+  forecastDate: string
+  runHour: number
+  step: number
+  variable: string
+  dataFormat: 'GRIB' | 'NETCDF'
+  dataUrl: string
 }>({
   source: 'manual',
   remoteSource: 'ecmwf',
@@ -90,6 +96,12 @@ const form = reactive<{
   month: new Date().getMonth() + 1,
   day: undefined,
   imageUrls: '',
+  forecastDate: new Date().toISOString().slice(0, 10),
+  runHour: 0,
+  step: 24,
+  variable: '2t',
+  dataFormat: 'GRIB',
+  dataUrl: '',
 })
 
 const selectedType = computed(() => imageTypeOptions.value.find((item) => item.value === form.type))
@@ -108,8 +120,26 @@ const progressText = computed(() => {
   if (form.source === 'manual') {
     return progressPercent.value >= 100 ? '图片上传完成' : '正在上传图片'
   }
+  if (form.source === 'ecmwfRaw') {
+    return progressPercent.value >= 100 ? '原始数据出图完成' : '正在下载并解析 ECMWF 原始数据'
+  }
   return progressPercent.value >= 100 ? '远程图片拉取完成' : '后端正在拉取远程图片'
 })
+
+watch(
+  () => form.type,
+  (type) => {
+    const variableByType: Record<string, string> = {
+      WEA_MSLP: 'msl',
+      WEA_T2M: '2t',
+      WEA_TP: 'tp',
+      WEA_U10: '10u',
+      SIC: 'siconc',
+    }
+    form.variable = variableByType[type] || form.variable
+  },
+  { immediate: true },
+)
 
 onMounted(fetchTypeOptions)
 onBeforeUnmount(releaseManualPreviews)
@@ -234,11 +264,11 @@ function validateForm() {
   if (form.source === 'manual' && !validateSelectedFiles()) {
     return false
   }
-  if (form.source === 'ecmwf' && imageUrlCount.value === 0) {
+  if (form.source === 'ecmwfUrl' && imageUrlCount.value === 0) {
     ElMessage.warning('请填写 ECMWF 图片地址')
     return false
   }
-  if (form.source === 'ecmwf' && remoteUrlErrors.value.length > 0) {
+  if (form.source === 'ecmwfUrl' && remoteUrlErrors.value.length > 0) {
     ElMessage.warning(remoteUrlErrors.value[0].message)
     return false
   }
@@ -257,7 +287,9 @@ async function submitPublish() {
   try {
     const response = form.source === 'manual'
       ? await publishManual()
-      : await publishFromEcmwf()
+      : form.source === 'ecmwfRaw'
+        ? await publishFromEcmwfRaw()
+        : await publishFromEcmwf()
     published.value = response.data?.data || response.data
     progressPercent.value = 100
     ElMessage.success(response.data?.message || '发布成功')
@@ -301,6 +333,25 @@ function publishFromEcmwf() {
     day: requiresDay.value && form.day ? String(form.day) : undefined,
     type: form.type,
     imageUrls: parseImageUrls(form.imageUrls),
+  })
+}
+
+function publishFromEcmwfRaw() {
+  progressPercent.value = 12
+  return adminRequest.post('/admin/forecast-result-images/ecmwf/raw', {
+    year: String(form.year),
+    month: String(form.month),
+    day: requiresDay.value && form.day ? String(form.day) : undefined,
+    type: form.type,
+    data: {
+      forecastDate: form.forecastDate,
+      runHour: form.runHour,
+      step: form.step,
+      variable: form.variable,
+      format: form.dataFormat,
+      dataUrl: form.dataUrl.trim() || undefined,
+      title: `${selectedType.value?.label || form.type} ${form.forecastDate} +${form.step}h`,
+    },
   })
 }
 
@@ -379,7 +430,7 @@ function releaseManualPreviews() {
       </div>
       <div class="hero-facts">
         <div>
-          <strong>{{ form.source === 'manual' ? '手动上传' : 'ECMWF 拉取' }}</strong>
+          <strong>{{ form.source === 'manual' ? '手动上传' : form.source === 'ecmwfRaw' ? '原始数据' : '远程图片' }}</strong>
           <span>来源</span>
         </div>
         <div>
@@ -387,7 +438,7 @@ function releaseManualPreviews() {
           <span>粒度</span>
         </div>
         <div>
-          <strong>{{ form.source === 'manual' ? fileList.length : imageUrlCount }}</strong>
+          <strong>{{ form.source === 'manual' ? fileList.length : form.source === 'ecmwfRaw' ? 1 : imageUrlCount }}</strong>
           <span>图片</span>
         </div>
       </div>
@@ -399,7 +450,7 @@ function releaseManualPreviews() {
           <span>1</span>
           <div>
             <strong>来源</strong>
-            <p>{{ form.source === 'manual' ? '本地图片' : '远程图片' }}</p>
+            <p>{{ form.source === 'manual' ? '本地图片' : form.source === 'ecmwfRaw' ? 'ECMWF GRIB/NetCDF' : '远程图片' }}</p>
           </div>
         </div>
         <div class="flow-item is-active">
@@ -409,11 +460,11 @@ function releaseManualPreviews() {
             <p>{{ targetSummary }}</p>
           </div>
         </div>
-        <div class="flow-item" :class="{ 'is-active': form.source === 'manual' ? fileList.length > 0 : imageUrlCount > 0 }">
+        <div class="flow-item" :class="{ 'is-active': form.source === 'manual' ? fileList.length > 0 : form.source === 'ecmwfRaw' ? Boolean(form.forecastDate && form.variable) : imageUrlCount > 0 }">
           <span>3</span>
           <div>
             <strong>发布内容</strong>
-            <p>{{ form.source === 'manual' ? `${fileList.length} 个文件` : `${imageUrlCount} 个地址` }}</p>
+            <p>{{ form.source === 'manual' ? `${fileList.length} 个文件` : form.source === 'ecmwfRaw' ? `${form.variable} / +${form.step}h` : `${imageUrlCount} 个地址` }}</p>
           </div>
         </div>
         <button class="refresh-types" type="button" @click="fetchTypeOptions">
@@ -429,11 +480,12 @@ function releaseManualPreviews() {
           <el-form-item label="来源">
               <el-radio-group v-model="form.source">
                 <el-radio-button label="manual">手动上传</el-radio-button>
-                <el-radio-button label="ecmwf">ECMWF 拉取</el-radio-button>
+                <el-radio-button label="ecmwfRaw">原始数据出图</el-radio-button>
+                <el-radio-button label="ecmwfUrl">成品图 URL</el-radio-button>
               </el-radio-group>
             </el-form-item>
 
-            <el-form-item v-if="form.source === 'ecmwf'" label="远程来源">
+            <el-form-item v-if="form.source === 'ecmwfUrl'" label="远程来源">
               <el-select v-model="form.remoteSource">
                 <el-option
                   v-for="item in remoteSourceOptions"
@@ -468,6 +520,29 @@ function releaseManualPreviews() {
             </el-form-item>
           </div>
 
+          <div v-if="form.source === 'ecmwfRaw'" class="raw-data-grid">
+            <el-form-item label="预报日期">
+              <el-date-picker v-model="form.forecastDate" type="date" value-format="YYYY-MM-DD" />
+            </el-form-item>
+            <el-form-item label="起报时次">
+              <el-select v-model="form.runHour">
+                <el-option v-for="hour in [0, 6, 12, 18]" :key="hour" :label="`${String(hour).padStart(2, '0')} UTC`" :value="hour" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="预报步长">
+              <el-input-number v-model="form.step" :min="0" :max="360" :step="6" controls-position="right" />
+            </el-form-item>
+            <el-form-item label="数据格式">
+              <el-segmented v-model="form.dataFormat" :options="['GRIB', 'NETCDF']" />
+            </el-form-item>
+            <el-form-item label="变量短名">
+              <el-input v-model="form.variable" placeholder="2t / msl / tp / 10u" />
+            </el-form-item>
+            <el-form-item class="raw-url-field" label="原始数据地址（留空自动生成 Open Data 地址）">
+              <el-input v-model="form.dataUrl" placeholder="https://data.ecmwf.int/forecasts/..." />
+            </el-form-item>
+          </div>
+
           <el-form-item v-if="form.source === 'manual'" label="图片文件">
             <el-upload
               v-model:file-list="fileList"
@@ -486,7 +561,7 @@ function releaseManualPreviews() {
             </el-upload>
           </el-form-item>
 
-          <el-form-item v-else label="ECMWF 图片地址">
+          <el-form-item v-else-if="form.source === 'ecmwfUrl'" label="ECMWF 图片地址">
             <el-input
               v-model="form.imageUrls"
               type="textarea"
@@ -505,7 +580,7 @@ function releaseManualPreviews() {
             </article>
           </div>
 
-          <div v-if="remoteUrlChecks.length" class="url-check-list">
+          <div v-if="form.source === 'ecmwfUrl' && remoteUrlChecks.length" class="url-check-list">
             <div
               v-for="(item, index) in remoteUrlChecks"
               :key="`${item.value}-${index}`"
@@ -524,7 +599,7 @@ function releaseManualPreviews() {
           <div v-if="loading || progressPercent > 0" class="publish-progress">
             <el-progress
               :percentage="progressPercent"
-              :indeterminate="loading && form.source === 'ecmwf'"
+              :indeterminate="loading && form.source !== 'manual'"
               :status="progressPercent >= 100 ? 'success' : undefined"
             />
             <span>{{ progressText }}</span>
@@ -542,7 +617,7 @@ function releaseManualPreviews() {
           <div class="actions">
             <div>
               <strong>{{ targetSummary }}</strong>
-              <span>{{ form.source === 'manual' ? `${fileList.length} 个文件` : `${imageUrlCount} 个地址` }}</span>
+              <span>{{ form.source === 'manual' ? `${fileList.length} 个文件` : form.source === 'ecmwfRaw' ? `${form.variable} / +${form.step}h` : `${imageUrlCount} 个地址` }}</span>
             </div>
             <el-button type="primary" :loading="loading" @click="submitPublish">发布</el-button>
           </div>
@@ -788,6 +863,16 @@ function releaseManualPreviews() {
 
 .admin-upload {
   width: 100%;
+}
+
+.raw-data-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(150px, 1fr));
+  gap: 14px 18px;
+}
+
+.raw-url-field {
+  grid-column: span 3;
 }
 
 .upload-icon {
@@ -1068,6 +1153,14 @@ function releaseManualPreviews() {
 
   .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .raw-data-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .raw-url-field {
+    grid-column: auto;
   }
 
   .brand-text {
