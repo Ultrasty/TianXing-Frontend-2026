@@ -437,11 +437,13 @@ onMounted(async () => {
 .picture-container {
   position: relative;
   display: flex;
+  width: 100%;
   min-height: 500px;
+  box-sizing: border-box;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 20px;
+  padding: 20px clamp(88px, 12%, 160px);
   overflow: hidden;
   background: white;
   border-radius: 8px;
@@ -517,6 +519,11 @@ onMounted(async () => {
   .chart-selector {
     margin-right: 4%;
     margin-left: 4%;
+  }
+
+  .picture-container {
+    padding-right: 56px;
+    padding-left: 56px;
   }
 }
 </style>

@@ -460,8 +460,8 @@ onMounted(async () => {
         </el-table-column>
         <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" :icon="Edit" @click="openEdit(row)">更新</el-button>
-            <el-button link type="danger" :icon="Delete" @click="removeRecord(row)">删除</el-button>
+            <el-button link type="primary" :icon="Edit" @click="openEdit(row as EvaluationRecord)">更新</el-button>
+            <el-button link type="danger" :icon="Delete" @click="removeRecord(row as EvaluationRecord)">删除</el-button>
           </template>
         </el-table-column>
         <template #empty><el-empty description="暂无评估数据" /></template>
