@@ -51,43 +51,49 @@
         z-index: 0;
       }
 
-      &:hover {
-        color: white;
-        background: transparent;
-        border-radius: 0;
-      }
+  &:hover {
+    color: white;
+    background: transparent;
+    border-radius: 0;
+  }
+
+  &.arrow-left,
+  &.arrowLeft {
+    left: 0;
+
+    &:active {
+      transform: perspective(600px) rotateY(15deg) scale(0.95);
     }
 
-    &.arrow-left,
-    &.arrowLeft{
-      left: 0;
-      &:active {
-        transform: perspective(600px) rotateY(15deg) scale(0.95);
-      }
-      &:hover:before{
-        left:0;
-      }
-      &:before{
-        left: -100%;
-        background: linear-gradient(to left, transparent, rgba(0, 64, 192, 0.3));
-        transition: left 0.3s ease;
-      }
+    &:hover:before{
+      left:0;
     }
 
-    &.arrow-right,
-    &.arrowRight{
+    &:before{
+      left: -100%;
+      background: linear-gradient(to left, transparent, rgba(0, 64, 192, 0.3));
+      transition: left 0.3s ease;
+    }
+  }
+
+  &.arrow-right,
+  &.arrowRight {
+    right:0;
+
+    &:active {
+      transform: perspective(600px) rotateY(-15deg) scale(0.95);
+    }
+
+    &:hover:before{
       right:0;
-      &:active {
-        transform: perspective(600px) rotateY(-15deg) scale(0.95);
-      }
-      &:hover:before{
-        right:0;
-      }
-      &:before{
-        right: -100%;
-        background: linear-gradient(to right, transparent, rgba(0, 64, 192, 0.3));
-        transition: right 0.3s ease;
-      }
+    }
+
+    &:before{
+      right: -100%;
+      background: linear-gradient(to right, transparent, rgba(0, 64, 192, 0.3));
+      transition: right 0.3s ease;
+    }
+  }
     }
   }
 }

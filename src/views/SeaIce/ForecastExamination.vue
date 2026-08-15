@@ -1,19 +1,46 @@
 <script setup>
-
-import { ref, onMounted, computed } from "vue";
+import { computed, onMounted, ref } from 'vue'
+import axios from 'axios'
 import VChart from 'vue-echarts'
-import axios from 'axios';
-import bannerImg from '@/assets/Ice.jpg';
+import bannerImg from '@/assets/Ice.jpg'
+import { requestErrorMessage } from '@/utils/requestError'
 
-const selectedTime = ref(new Date('2023-01'));
+const chartNames = ['SIC日预测误差', 'SIC误差统计', 'SIE误差分析']
+const chartSelected = ref(0)
+const selectedDates = ref([null, null, null])
+const availableValues = ref([[], [], []])
+const availabilityLoading = ref([false, false, false])
+const availabilityErrors = ref(['', '', ''])
+const dataLoading = ref([false, false, false])
+const dataErrors = ref(['', '', ''])
+const availabilityRequestIds = [0, 0, 0]
+const requestIds = [0, 0, 0]
+const tabCharts = ref([[], [], []])
 
-const selectedYear = computed(() => {
-  return selectedTime.value.getFullYear();
+const descriptions = computed(() => {
+  const date = selectedDates.value[chartSelected.value]
+  const year = date?.getFullYear()
+  const month = date ? date.getMonth() + 1 : null
+  return [
+    year && month
+      ? `展示${year}年${month}月的4周 SIC 预测结果与基线方法的比较。`
+      : '展示所选月份的4周 SIC 预测结果与基线方法的比较。',
+    year
+      ? `展示${year}年四种 SIC 预测方法提前1至7天的误差统计。`
+      : '展示所选年份四种 SIC 预测方法提前1至7天的误差统计。',
+    year
+      ? `展示截至${year}年的 SIE 预测误差构成、相关系数和标准差。`
+      : '展示所选年份的 SIE 预测误差构成、相关系数和标准差。',
+  ]
 })
-const selectedMonth = computed(() => {
-  return selectedTime.value.getMonth() + 1;
+
+const selectedTime = computed({
+  get: () => selectedDates.value[chartSelected.value],
+  set: (value) => {
+    selectedDates.value[chartSelected.value] = value
+  },
 })
-const selectedDay = computed(() => { return selectedTime.value; });
+const activeCharts = computed(() => tabCharts.value[chartSelected.value] || [])
 
 const start_year1 = ref(null);
 const start_month1 = ref(null);
@@ -26,9 +53,6 @@ const start_year = ref(2023);     //可选时间范围
 const end_year = ref(2023);
 const start_month = ref(1);     //可选时间范围
 const end_month = ref(1);
-
-const chartSelected = ref(0);
-const chartNames = ['SIC日预测误差', 'SIC误差统计', 'SIE误差分析'];
 
 const moveBoxLeft = computed(() => chartSelected.value * 250);
 const movBoxStyle = computed(() => ({
@@ -100,6 +124,13 @@ const updateTab1 = () => {
   axios.get('/seaice/error?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
     .then(response => {
       console.log(response.data);
+      const baccKey = `${selectedYear.value}_BACC`;
+      const persistenceBaccKey = `${selectedYear.value}_per_BACC`;
+      const rmseKey = `${selectedYear.value}_RMSE`;
+      const persistenceRmseKey = `${selectedYear.value}_per_RMSE`;
+      const sampleCount = Math.max(response.data[baccKey]?.length || 0, response.data[rmseKey]?.length || 0);
+      const metricSamples = Array.from({ length: sampleCount }, (_, index) => `样本${index + 1}`);
+      const asPercent = (key) => (response.data[key] || []).map(value => value * 100);
       option1.value = {
         title: {
           text: chartTitle.value,
@@ -109,7 +140,7 @@ const updateTab1 = () => {
         xAxis: {
           type: 'category',
           name: '时间',
-          data: chartX.value
+          data: metricSamples
         },
         yAxis: {
           type: 'value',
@@ -126,13 +157,13 @@ const updateTab1 = () => {
           {
             name: 'ours',
             type: 'line',
-            data: response.data["2023_BACC"],
+            data: asPercent(baccKey),
 
           },
           {
             name: 'persistence',
             type: 'line',
-            data: response.data["2023_per_BACC"],
+            data: asPercent(persistenceBaccKey),
           },
 
         ]
@@ -143,7 +174,7 @@ const updateTab1 = () => {
         xAxis: {
           type: 'category',
           name: '时间',
-          data: chartX.value
+          data: metricSamples
         },
         yAxis: {
           type: 'value',
@@ -160,12 +191,12 @@ const updateTab1 = () => {
           {
             name: 'ours',
             type: 'line',
-            data: response.data["2023_RMSE"],
+            data: asPercent(rmseKey),
           },
           {
             name: 'persistence',
             type: 'line',
-            data: response.data["2023_per_RMSE"],
+            data: asPercent(persistenceRmseKey),
           },
 
         ]
@@ -177,120 +208,11 @@ const updateTab1 = () => {
     });
 }
 
-const updateTab2 = () => {
-  axios.get('/seaice/errorBox?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
-    .then(response => {
-      console.log(response.data);
-      const data0 = response.data["withoutDA_withoutBC"];
-      const data1 = response.data["withoutDA_withBC_RMSE"];
-      const data2 = response.data["withDA_withoutBC_RMSE"];
-      const data3 = response.data["MITgcm(with DA)withBC_RMSE"];
-      option3.value = {
-        title: {
-          text: chartTitle3.value,
-          left: 'center' //标题水平居中
-        },
-
-        dataset: [
-          {
-            source: data0
-          },
-          {
-            source: data1
-          },
-          {
-            source: data2
-          },
-          {
-            source: data3
-          },
-          {
-            fromDatasetIndex: 0,
-            transform: { type: 'boxplot' }
-          },
-          {
-            fromDatasetIndex: 1,
-            transform: { type: 'boxplot' }
-          },
-          {
-            fromDatasetIndex: 2,
-            transform: { type: 'boxplot' }
-          },
-          {
-            fromDatasetIndex: 3,
-            transform: { type: 'boxplot' }
-          }
-        ],
-        legend: {
-          top: '10%'
-        },
-        tooltip: {
-          trigger: 'item',
-          axisPointer: {
-            type: 'shadow'
-          }
-        },
-        grid: {
-          left: '10%',
-          top: '20%',
-          right: '10%',
-          bottom: '15%'
-        },
-        xAxis: {
-          type: 'category',
-          name: 'Lead time',
-          axisLabel: {
-            formatter: function (value) {
-              return (parseInt(value) + 1) + 'day';
-            },
-            align: 'center'
-          },
-          boundaryGap: true,
-          nameGap: 30,
-          splitArea: {
-            show: true
-          },
-          splitLine: {
-            show: false
-          }
-        },
-        yAxis: {
-          type: 'value',
-          name: 'RMSE(%)',
-          splitArea: {
-            show: false
-          }
-        },
-        series: [
-          {
-            name: 'withDA_withoutBC_RMSE',
-            type: 'boxplot',
-            datasetIndex: 4
-          },
-          {
-            name: 'withoutDA_withoutBC',
-            type: 'boxplot',
-            datasetIndex: 5
-          },
-          {
-            name: 'withoutDA_withBC_RMSE',
-            type: 'boxplot',
-            datasetIndex: 6
-          },
-          {
-            name: 'MITgcm(with DA)withBC_RMSE',
-            type: 'boxplot',
-            datasetIndex: 7
-          }
-        ]
-
-      }
-
-      //SICChartErroAdd.value = response.data.description;
-    })
-    .catch(error => {
-      console.error(error);
-    });
+function createMonth(yearValue, monthValue = 1) {
+  const year = toNumber(yearValue)
+  const month = toNumber(monthValue)
+  if (year === null || month === null || month < 1 || month > 12) return null
+  return new Date(year, month - 1, 1)
 }
 
 
@@ -307,9 +229,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
@@ -338,9 +258,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
@@ -376,9 +294,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
@@ -408,9 +324,7 @@ const updateTab3 = () => {
         xAxis: {
           type: 'category',
           // name: '时间',
-          data: ['2020 spring', '2020 summer', '2020 fall', '2020 winter',
-            '2021 spring', '2021 summer', '2021 fall', '2021 winter',
-            '2022 spring', '2022 summer', '2022 fall', '2022 winter']
+          data: Array.from({ length: 12 }, (_, index) => `提前${index + 1}月`)
         },
         yAxis: {
           type: 'value',
@@ -442,317 +356,498 @@ const updateTab3 = () => {
     });
 }
 
-function selectChart(index) {
-  chartSelected.value = index;
-  switch (index) {
-    case 0:
-      start_year.value = start_year1.value;
-      start_month.value = start_month1.value;
-      selectedTime.value = new Date(start_year.value, start_month.value - 1);
-      updateTab1();
-      break;
-    case 1:
-      start_year.value = start_year2.value;
-      start_month.value = start_month2.value;
-      selectedTime.value = new Date(start_year.value, start_month.value - 1);
-      updateTab2();
-      break;
-    case 2:
-      start_year.value = start_year3.value;
-      start_month.value = start_month3.value;
-      selectedTime.value = new Date(start_year.value, start_month.value - 1);
-      updateTab3();
-      break;
-  }
-  end_year.value = start_year.value;
-  end_month.value = start_month.value;
-
+function uniqueDates(dates, keyFunction) {
+  const unique = new Map()
+  dates.filter(Boolean).forEach((date) => unique.set(keyFunction(date), date))
+  return [...unique.values()].sort((left, right) => left.getTime() - right.getTime())
 }
 
-onMounted(() => {
-  Promise.all([
-    axios.get('/seaice/initial/SICError'),
-    axios.get('/seaice/initial/SICErrorBox'),
-    axios.get('/seaice/initial/SIEErrorAnalysis')
-  ]).then(([res1, res2, res3]) => {
-    // console.log(res1, res2, res3);
-    start_year1.value = res1.data.yearList;
-    start_month1.value = res1.data.monthList;
+function parseAvailableMonths(data) {
+  if (Array.isArray(data?.availableMonths)) {
+    return uniqueDates(
+      data.availableMonths.map((item) => createMonth(item?.year, item?.month)),
+      monthKey,
+    )
+  }
 
-    start_year2.value = res2.data.yearList;
-    start_month2.value = res2.data.monthList;
+  const years = Array.isArray(data?.yearList) ? data.yearList : []
+  const months = Array.isArray(data?.monthList) ? data.monthList : []
+  return uniqueDates(
+    years.flatMap((year) => months.map((month) => createMonth(year, month))),
+    monthKey,
+  )
+}
 
-    start_year3.value = res3.data.yearList;
-    start_month3.value = res3.data.monthList;
+function parseAvailableYears(data) {
+  const years = Array.isArray(data?.yearList) ? data.yearList : []
+  return uniqueDates(
+    years.map((year) => createMonth(year, 1)),
+    (date) => String(date.getFullYear()),
+  )
+}
 
-    selectChart(0);
-  }).catch(error => {
-    console.error('Error fetching data:', error);
-  });
-});
+function initialEndpoint(index) {
+  return [
+    '/seaice/initial/SICError',
+    '/seaice/initial/SICErrorBox',
+    '/seaice/initial/SIEErrorAnalysis',
+  ][index]
+}
 
+async function loadAvailability(index) {
+  const requestId = ++availabilityRequestIds[index]
+  availabilityLoading.value[index] = true
+  availabilityErrors.value[index] = ''
 
+  try {
+    const response = await axios.get(initialEndpoint(index))
+    if (requestId !== availabilityRequestIds[index]) return
+    const available = index === 0
+      ? parseAvailableMonths(response.data)
+      : parseAvailableYears(response.data)
+    if (available.length === 0) throw new Error('Empty sea-ice examination availability')
+
+    availableValues.value[index] = available
+    const current = selectedDates.value[index]
+    const key = index === 0
+      ? (date) => monthKey(date)
+      : (date) => String(date.getFullYear())
+    selectedDates.value[index] = current && available.some(
+      (item) => key(item) === key(current),
+    )
+      ? current
+      : new Date(available[available.length - 1])
+  } catch (error) {
+    if (requestId !== availabilityRequestIds[index]) return
+    availableValues.value[index] = []
+    selectedDates.value[index] = null
+    availabilityErrors.value[index] = requestErrorMessage(
+      error,
+      `${chartNames[index]}可选日期加载失败`,
+    )
+  } finally {
+    if (requestId === availabilityRequestIds[index]) {
+      availabilityLoading.value[index] = false
+    }
+  }
+}
+
+function disabledDate(time) {
+  const available = availableValues.value[chartSelected.value]
+  if (available.length === 0) return false
+
+  if (chartSelected.value === 0) {
+    const keys = new Set(available.map(monthKey))
+    return !keys.has(monthKey(time))
+  }
+  const years = new Set(available.map((date) => date.getFullYear()))
+  return !years.has(time.getFullYear())
+}
+
+function createLineOptions(data, date) {
+  const year = date.getFullYear()
+  const month = date.getMonth() + 1
+  const bacc = data?.[`${year}_BACC`]
+  const persistenceBacc = data?.[`${year}_per_BACC`]
+  const rmse = data?.[`${year}_RMSE`]
+  const persistenceRmse = data?.[`${year}_per_RMSE`]
+  if (![bacc, persistenceBacc, rmse, persistenceRmse].every(Array.isArray)) {
+    throw new Error('Invalid SIC daily error response')
+  }
+
+  const length = Math.max(
+    bacc.length,
+    persistenceBacc.length,
+    rmse.length,
+    persistenceRmse.length,
+  )
+  const dates = Array.from({ length }, (_, index) => {
+    const value = new Date(year, month - 1, index + 1)
+    return `${value.getFullYear()}/${value.getMonth() + 1}/${value.getDate()}`
+  })
+
+  const baseOption = {
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', name: '时间', data: dates },
+    legend: {
+      data: ['ours', 'persistence'],
+      orient: 'horizontal',
+      left: 'center',
+      bottom: 5,
+    },
+  }
+
+  return [
+    {
+      ...baseOption,
+      title: {
+        text: `${year}年${month}月 SIC 预测 BACC`,
+        left: 'center',
+      },
+      yAxis: { type: 'value', name: 'BACC(%)' },
+      series: [
+        { name: 'ours', type: 'line', data: bacc },
+        { name: 'persistence', type: 'line', data: persistenceBacc },
+      ],
+    },
+    {
+      ...baseOption,
+      title: {
+        text: `${year}年${month}月 SIC 预测 RMSE`,
+        left: 'center',
+      },
+      yAxis: { type: 'value', name: 'RMSE(%)' },
+      series: [
+        { name: 'ours', type: 'line', data: rmse },
+        { name: 'persistence', type: 'line', data: persistenceRmse },
+      ],
+    },
+  ]
+}
+
+function createBoxOption(data, date) {
+  const sources = [
+    data?.withoutDA_withoutBC,
+    data?.withoutDA_withBC_RMSE,
+    data?.withDA_withoutBC_RMSE,
+    data?.['MITgcm(with DA)withBC_RMSE'],
+  ]
+  if (!sources.every(Array.isArray)) {
+    throw new Error('Invalid SIC boxplot response')
+  }
+
+  return {
+    title: {
+      text: `${date.getFullYear()}年SIC回报结果误差箱型图`,
+      left: 'center',
+    },
+    dataset: [
+      ...sources.map((source) => ({ source })),
+      ...sources.map((_, index) => ({
+        fromDatasetIndex: index,
+        transform: { type: 'boxplot' },
+      })),
+    ],
+    legend: { top: '10%' },
+    tooltip: { trigger: 'item', axisPointer: { type: 'shadow' } },
+    grid: { left: '10%', top: '20%', right: '10%', bottom: '15%' },
+    xAxis: {
+      type: 'category',
+      name: 'Lead time',
+      axisLabel: {
+        formatter: (value) => `${Number.parseInt(value, 10) + 1}day`,
+      },
+      boundaryGap: true,
+      nameGap: 30,
+      splitArea: { show: true },
+      splitLine: { show: false },
+    },
+    yAxis: { type: 'value', name: 'RMSE(%)' },
+    series: [
+      { name: 'without DA / without BC', type: 'boxplot', datasetIndex: 4 },
+      { name: 'without DA / with BC', type: 'boxplot', datasetIndex: 5 },
+      { name: 'with DA / without BC', type: 'boxplot', datasetIndex: 6 },
+      { name: 'MITgcm (with DA) / with BC', type: 'boxplot', datasetIndex: 7 },
+    ],
+  }
+}
+
+function seasonLabels(year, length) {
+  const seasons = ['spring', 'summer', 'fall', 'winter']
+  const startYear = year - Math.ceil(length / 4) + 1
+  return Array.from({ length }, (_, index) => (
+    `${startYear + Math.floor(index / 4)} ${seasons[index % 4]}`
+  ))
+}
+
+function createSieOptions(data, date) {
+  const rmsd = data?.RMSD
+  const bias = data?.BAIS
+  const variance = data?.VAR
+  const correlation = data?.CORRELATION
+  const observationStd = data?.OBS_STD
+  const predictionStd = data?.PRE_STD
+  if (
+    ![rmsd, bias, variance, correlation, observationStd, predictionStd]
+      .every(Array.isArray)
+  ) {
+    throw new Error('Invalid SIE error-analysis response')
+  }
+
+  const labels = seasonLabels(date.getFullYear(), rmsd.length)
+  const xAxis = { type: 'category', data: labels }
+
+  return [
+    {
+      title: { text: 'SIE预测均方根偏差', left: 'center' },
+      tooltip: { trigger: 'axis' },
+      xAxis,
+      yAxis: { type: 'value', name: 'RMSD(million km²)' },
+      series: [{ name: 'RMSD', type: 'line', data: rmsd }],
+    },
+    {
+      title: { text: 'SIE预测偏差与方差', left: 'center' },
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['bias', 'variance'], bottom: 5 },
+      xAxis,
+      yAxis: { type: 'value', name: 'RMSD²(million km²)' },
+      series: [
+        { name: 'bias', type: 'bar', data: bias },
+        { name: 'variance', type: 'bar', data: variance },
+      ],
+    },
+    {
+      title: { text: 'SIE预测相关系数', left: 'center' },
+      tooltip: { trigger: 'axis' },
+      xAxis,
+      yAxis: { type: 'value', name: 'Correlation coefficient' },
+      series: [{ name: 'correlation', type: 'line', data: correlation }],
+    },
+    {
+      title: { text: 'SIE观测与预测标准差', left: 'center' },
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['observation', 'IceTFT'], bottom: 5 },
+      xAxis,
+      yAxis: { type: 'value', name: 'standard deviation(million km²)' },
+      series: [
+        { name: 'observation', type: 'line', data: observationStd },
+        { name: 'IceTFT', type: 'line', data: predictionStd },
+      ],
+    },
+  ]
+}
+
+async function updateChart(index = chartSelected.value) {
+  const date = selectedDates.value[index]
+  if (!date) return
+
+  const requestId = ++requestIds[index]
+  dataLoading.value[index] = true
+  dataErrors.value[index] = ''
+  tabCharts.value[index] = []
+
+  try {
+    let response
+    if (index === 0) {
+      response = await axios.get('/seaice/error', {
+        params: {
+          year: date.getFullYear(),
+          month: date.getMonth() + 1,
+        },
+      })
+    } else if (index === 1) {
+      response = await axios.get('/seaice/errorBox', {
+        params: { year: date.getFullYear() },
+      })
+    } else {
+      response = await axios.get('/seaice/predictionExamination/errorAnalysis', {
+        params: { year: date.getFullYear() },
+      })
+    }
+    if (requestId !== requestIds[index]) return
+
+    tabCharts.value[index] = index === 0
+      ? createLineOptions(response.data, date)
+      : index === 1
+        ? [createBoxOption(response.data, date)]
+        : createSieOptions(response.data, date)
+  } catch (error) {
+    if (requestId !== requestIds[index]) return
+    dataErrors.value[index] = requestErrorMessage(
+      error,
+      `${chartNames[index]}数据加载失败`,
+    )
+  } finally {
+    if (requestId === requestIds[index]) dataLoading.value[index] = false
+  }
+}
+
+async function selectChart(index) {
+  chartSelected.value = index
+  if (availableValues.value[index].length > 0 && tabCharts.value[index].length === 0) {
+    await updateChart(index)
+  }
+}
+
+function handleDateChange() {
+  document.activeElement?.blur()
+  updateChart()
+}
+
+async function retryAvailability() {
+  await loadAvailability(chartSelected.value)
+  if (selectedTime.value) await updateChart()
+}
+
+onMounted(async () => {
+  await Promise.all([0, 1, 2].map(loadAvailability))
+  if (selectedDates.value[0]) await updateChart(0)
+})
 </script>
 
 <template>
-  <div class="pageContent">
+  <div class="page-content">
     <div class="banner">
-      <img :src="bannerImg" />
-      <h3 class="title">海冰预测结果检验</h3>
+      <img :src="bannerImg" alt="">
+      <h3 class="page-title">海冰预测结果检验</h3>
     </div>
 
     <div class="menu-container">
       <ul class="menu">
-        <div :style="movBoxStyle"></div>
-        <li v-for="(chartName, index) in chartNames" :key="chartName" @click="selectChart(index)"
-          :class="{ 'chart-name-selected': chartSelected === index }">
+        <div :style="movBoxStyle" class="mov-box"></div>
+        <li
+          v-for="(chartName, index) in chartNames"
+          :key="chartName"
+          :class="{ 'chart-name-selected': chartSelected === index }"
+          @click="selectChart(index)"
+        >
           <p>{{ chartName }}</p>
         </li>
       </ul>
     </div>
 
-
-    <div style="margin: 0 10%;">
-
-      <div class="datePickerContainer">
-        <el-date-picker @change="updateChart()" v-model="selectedTime" type="month" :clearable="false"
-          :disabledDate="limitedDateRange2" v-if="chartSelected === 0 || chartSelected === 2" />
-        <el-date-picker @change="updateChart()" v-model="selectedTime" type="year" :clearable="false"
-          :disabledDate="limitedDateRange" v-if="chartSelected === 1" />
+    <section class="content-shell">
+      <div class="date-picker-container">
+        <el-date-picker
+          v-model="selectedTime"
+          :type="chartSelected === 0 ? 'month' : 'year'"
+          :clearable="false"
+          :disabled="availabilityLoading[chartSelected] || !selectedTime"
+          :disabled-date="disabledDate"
+          @change="handleDateChange"
+        />
       </div>
 
-      <div class="text-container" v-if="chartSelected === 0">
-        <div class="description">
-          {{ SICChartErroPrediction }}
+      <div v-if="availabilityErrors[chartSelected]" class="state-panel">
+        <el-alert
+          :title="availabilityErrors[chartSelected]"
+          type="error"
+          :closable="false"
+          show-icon
+        />
+        <el-button type="primary" plain @click="retryAvailability">重试日期加载</el-button>
+      </div>
+
+      <div class="description">{{ descriptions[chartSelected] }}</div>
+    </section>
+
+    <section
+      class="charts-shell"
+      :class="{ 'has-state': Boolean(dataErrors[chartSelected]) }"
+      v-loading="dataLoading[chartSelected]"
+    >
+      <div v-if="dataErrors[chartSelected]" class="state-panel">
+        <el-alert :title="dataErrors[chartSelected]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="updateChart()">重新加载</el-button>
+      </div>
+
+      <template v-else-if="activeCharts.length">
+        <div v-for="(option, index) in activeCharts" :key="index" class="chart-container">
+          <v-chart class="chart" :option="option" autoresize />
         </div>
-      </div>
-      <div class="text-container" v-if="chartSelected === 1">
-        <div class="description">
-          {{ SICChartErroAdd }}
-        </div>
-      </div>
-      <div class="text-container" v-if="chartSelected === 2">
-        <div class="description">
-          {{ SIEChartErroAnalyse }}
-        </div>
-      </div>
-    </div>
+      </template>
 
-
-    <div>
-      <p></p>
-    </div>
-
-    <div v-if="chartSelected === 0">
-      <div class="chart-selector">
-        <v-chart class="chart" :option="option1" autoresize></v-chart>
-      </div>
-      <div class="chart-selector">
-        <v-chart class="chart" :option="option2" autoresize></v-chart>
-      </div>
-    </div>
-
-    <div v-else-if="chartSelected === 1">
-      <div class="chart-selector">
-        <v-chart class="chart" :option="option3" autoresize></v-chart>
-      </div>
-    </div>
-
-    <div v-else-if="chartSelected === 2">
-
-      <div class="chart-selector">
-        <v-chart class="chart" :option="option4" autoresize></v-chart>
-      </div>
-
-      <div class="chart-selector">
-        <v-chart class="chart" :option="option5" autoresize></v-chart>
-      </div>
-
-
-      <div class="chart-selector">
-        <v-chart class="chart" :option="option6" autoresize></v-chart>
-      </div>
-
-      <div class="chart-selector">
-        <v-chart class="chart" :option="option7" autoresize></v-chart>
-      </div>
-    </div>
+      <el-empty
+        v-else-if="!dataLoading[chartSelected]"
+        :description="`暂无${chartNames[chartSelected]}数据`"
+      />
+    </section>
   </div>
 </template>
 
-
 <style scoped lang="scss">
-.title {
-  font-family: 'STXinwei';
-  font-weight: 300; //调整字体粗细
-  text-align: center;
-  font-size: 55px;
-  margin-left: 20%;
-  letter-spacing: 1px;
-  /* 字符间距 */
-  z-index: 1;
-  /* 确保图片在文字下方 */
-  //color:#ffffff;
-  color: rgb(19, 24, 36);
+.page-content {
+  min-height: 100%;
 }
 
 .banner {
   position: relative;
   height: 420px;
   display: flex;
-  flex-direction: row;
   align-items: center;
 }
 
 .banner img {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
-  /* 确保图片在文字下方 */
-  z-index: 0;
+}
+
+.page-title {
+  position: relative;
+  z-index: 1;
+  margin-left: 20%;
+  color: rgb(19, 24, 36);
+  font-family: 'STXinwei';
+  font-size: 55px;
+  font-weight: 300;
 }
 
 .menu-container {
+  position: relative;
+  z-index: 2;
   display: flex;
-  //height: 105px;
-  height: 85px;
-  flex-direction: row;
   justify-content: center;
-  align-items: center;
+  height: 85px;
   margin-top: -50px;
 }
 
-ul.menu {
+.menu {
   position: relative;
-  list-style-type: none;
-  height: 100%;
   display: flex;
-  padding: 0px;
-  flex-direction: row;
-  justify-content: center;
-  background-color: white;
+  margin: 0;
+  padding: 0;
+  overflow-x: auto;
+  list-style: none;
+  background: white;
   border-radius: 10px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-  /* 新增: 确保伪元素不会超出 ul.menu 边界 */
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
 }
 
-/* 新增: 添加一个伪元素用于整个选项卡区域的上半部分透明或阴影效果 */
-ul.menu::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 55%;
-  /* 仅覆盖上半部分 */
-  background-color: rgba(240, 240, 240, 0.8);
-  /* 上半部分透明效果，或更改为 box-shadow 实现阴影效果 */
-  z-index: 0;
-  /* 确保伪元素在 li 元素下方 */
-  pointer-events: none;
-  /* 确保透明层不影响鼠标事件 */
-}
-
-ul.menu li {
-  position: relative;
+.menu li {
   display: flex;
   width: 250px;
-  height: 100%;
-  flex-direction: column;
-  justify-content: center;
+  min-width: 250px;
   align-items: center;
+  justify-content: center;
   cursor: pointer;
-  /* 更改鼠标形状为手形 */
-  overflow: hidden;
-  /* 确保伪元素的边界与 li 元素一致 */
   font-size: 17px;
 }
 
-ul.menu li:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 50%;
-  width: 2px;
-  height: 50%;
-  background-color: #00000020;
-  transform: translateY(-50%);
-}
-
-ul.menu li:hover p {
-  color: rgb(71, 72, 76);
-  z-index: 2;
-  /* 确保文字在覆盖层之上 */
-}
-
-/* 已经被选中的选项卡在鼠标悬停时字体颜色不变 */
-ul.menu li.chart-name-selected:hover p {
-  color: inherit; //保持原有颜色
+.chart-name-selected {
+  color: rgb(30, 158, 179);
 }
 
 .mov-box {
   position: absolute;
-  z-index: 3;
-  /* 确保滑动条在覆盖层之上 */
+  bottom: 0;
+  width: 125px;
+  height: 2px;
+  transform: translateX(50%);
+  background: rgb(143, 178, 201);
+  transition: left 0.3s ease;
 }
 
-
-.chart-name-selected {
-  color: rgb(30, 158, 179)
+.content-shell,
+.charts-shell {
+  margin-right: 10%;
+  margin-left: 10%;
 }
 
-.chart {
-  width: 100%;
-  display: flex;
-  height: 50vh;
-  min-height: 500px;
-  background-color: white;
-  /* 圆角 */
-  border-radius: 8px;
-  /* 阴影 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  padding-top: 20px;
-  padding-bottom: 20px;
-  margin-bottom: 15px;
-}
-
-.description {
-  text-align: center;
-  font-size: 17px;
-  margin-left: 10px;
-}
-
-.datePickerContainer {
+.date-picker-container {
   display: flex;
   justify-content: flex-end;
-  position: relative;
   padding: 50px 0 30px;
 }
 
-.text {
-  margin-left: 5px;
-  margin-right: 10px;
-}
-
-
-.text-container {
-  position: relative;
-  margin: 0px auto;
+.description {
+  padding: 18px;
   text-align: center;
-  background-color: rgba(239, 242, 252, 0.801);
-  ;
-  /* 淡紫色 */
-  //display: flex;
-  padding: 20px;
+  font-size: 17px;
+  background: rgba(239, 242, 252, 0.8);
   border-radius: 8px;
-  /* 可选的圆角 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  /* 阴影 */
-  //font-family: 'STKaiti';
-  // width: 80%;
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
 }
 </style>

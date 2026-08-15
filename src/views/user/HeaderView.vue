@@ -12,7 +12,7 @@
             v-for="menu in menus"
             :key="menu.name"
             class="nav-item"
-            :class="{ active: isActive(menu.name) }"
+            :class="{ active: isActive(menu) }"
             @mouseenter="menu.subMenus ? handleMouseEnterNavItem(menu) : (nav_item_selected = null)"
             @mouseleave="menu.subMenus ? handleMouseLeaveNavItem() : null"
           >
@@ -56,6 +56,7 @@
 
 <script lang="ts" setup>
 import { ref } from 'vue';
+import { useRoute } from 'vue-router';
 import logo_img from '@/assets/logo-img.png';
 import logo_txt_b from '@/assets/logo-txt-b.png';
 import logo_txt_w from '@/assets/logo-txt-w.png';
@@ -63,6 +64,7 @@ import logo_txt_w from '@/assets/logo-txt-w.png';
 import DropdownMenu from '@/views/user/DropdownMenu.vue';
 
 const isHeaderVisible = ref(true);
+const route = useRoute();
 
 const menus = ref([
   {
@@ -93,7 +95,7 @@ const menus = ref([
       { title: '预测结果', name: 'SeaIce_ForecastResult' },
       { title: '预测检验', name: 'SeaIce_ForecastExamination' },
     ],
-  },
+  }
 ]);
 
 const nav_item_selected = ref<string | null>(null);
@@ -106,8 +108,13 @@ const handleMouseLeaveNavItem = () => {
   nav_item_selected.value = null;
 };
 
-const isActive = (menuName: string) => {
-  return nav_item_selected.value === menuName;
+const isActive = (menu: any) => {
+  const routeName = route.name;
+  const matchesCurrentRoute = menu.subMenus
+    ? menu.subMenus.some((subMenu: any) => subMenu.name === routeName)
+    : menu.to?.name === routeName;
+
+  return nav_item_selected.value === menu.name || matchesCurrentRoute;
 };
 </script>
 

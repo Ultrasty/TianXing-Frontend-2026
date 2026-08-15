@@ -1,3 +1,11 @@
 /node_modules/
 /dist/
 dist.zip
+
+# Local Environment & Configs
+.env.local
+.vscode/
+.agents/
+*.agent.log
+.vs/
+.idea/

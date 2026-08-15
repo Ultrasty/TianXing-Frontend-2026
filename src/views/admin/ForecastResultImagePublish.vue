@@ -4,6 +4,7 @@ import type { AxiosProgressEvent } from 'axios'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Check, CopyDocument, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { clearAdminSession } from '@/utils/adminAuth'
 import adminRequest from '@/utils/adminRequest'
 import bg from '@/assets/bg.png'
 import logoImg from '@/assets/logo-img.png'
@@ -369,8 +370,7 @@ async function logout() {
   } catch (_error) {
     // Local logout still clears expired or unreachable sessions.
   }
-  localStorage.removeItem('tianxing_admin_token')
-  localStorage.removeItem('tianxing_admin_username')
+  clearAdminSession()
   router.push('/admin/login')
 }
 
@@ -417,10 +417,13 @@ function releaseManualPreviews() {
         <img class="brand-text" :src="logoText" alt="天行气象预测平台" />
         <span>后台系统</span>
       </div>
-      <div class="admin-actions">
-        <span>{{ currentAdmin }}</span>
-        <el-button :icon="SwitchButton" text @click="logout">退出</el-button>
-      </div>
+        <div class="admin-actions">
+          <el-button size="small" @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
+          <el-button size="small" type="primary">🖼️ 结果图发布</el-button>
+          <el-button size="small" @click="router.push({ name: 'home' })">🏠 公开站点</el-button>
+          <span>{{ currentAdmin }}</span>
+          <el-button :icon="SwitchButton" text @click="logout">退出</el-button>
+        </div>
     </header>
 
     <section class="admin-hero">
@@ -707,7 +710,7 @@ function releaseManualPreviews() {
 }
 
 .admin-actions :deep(.el-button) {
-  color: #ffffff;
+  color: #3a3a3a;
 }
 
 .admin-hero {
