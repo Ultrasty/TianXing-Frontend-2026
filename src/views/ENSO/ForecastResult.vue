@@ -190,8 +190,15 @@ function loadActiveData() {
   return chartSelected.value === 0 ? loadIndexChart() : loadModeImages()
 }
 
+function currentEnsoModeType() {
+  const title = currentHeatTitle.value
+  if (title.includes('ENSO_MC')) return 'ENSO_MC'
+  if (title.includes('ENSO_GTC')) return 'ENSO_GTC'
+  return 'ENSO_ASC'
+}
+
 async function deleteForecastResult() {
-  const date = selectedDates.value[chartSelected.value]
+  const date = selectedDates.value[1]
   if (!date) return
 
   try {
@@ -210,12 +217,13 @@ async function deleteForecastResult() {
       year: String(date.getFullYear()),
       month: String(date.getMonth() + 1),
       day: null,
-      type: 'ENSO_ASC',
+      type: currentEnsoModeType(),
+      imagePath: heatImages.value[heatIndex.value],
     }
 
-    const { data } = await axios.post('/admin/forecast-result-images/delete', payload)
+    const { data } = await axios.post('/admin/forecast-result-images/delete-image', payload)
     ElMessage.success(data?.message || '预报结果图删除成功')
-    await loadActiveData()
+    await loadModeImages()
   } catch (error) {
     if (error !== 'cancel') {
       console.error('删除预报结果图失败', error)
@@ -300,7 +308,7 @@ onMounted(async () => {
         />
       </div>
 
-      <div v-if="chartSelected === 0" class="result-actions">
+      <div v-if="chartSelected === 1" class="result-actions">
         <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
           删除预报结果图
         </el-button>

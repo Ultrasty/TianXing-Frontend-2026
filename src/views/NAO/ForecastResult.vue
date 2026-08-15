@@ -248,9 +248,10 @@ async function deleteForecastResult() {
       month: String(date.getMonth() + 1),
       day: null,
       type: 'NAO',
+      imagePath: slpImages.value[slpImageIndex.value],
     }
 
-    const { data } = await axios.post('/admin/forecast-result-images/delete', payload)
+    const { data } = await axios.post('/admin/forecast-result-images/delete-image', payload)
     ElMessage.success(data?.message || '预报结果图删除成功')
     await retryActive()
   } catch (error) {
@@ -312,7 +313,7 @@ onMounted(() => {
         />
       </div>
 
-      <div class="result-actions">
+      <div v-if="chartSelected === 1" class="result-actions">
         <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
           删除预报结果图
         </el-button>
