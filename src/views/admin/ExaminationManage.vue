@@ -2,12 +2,11 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox, type UploadFile } from 'element-plus'
-import { Back, Delete, Download, Edit, Plus, Refresh, Upload, Connection, SwitchButton } from '@element-plus/icons-vue'
+import { Back, Delete, Edit, Plus, Refresh, Upload, Connection, SwitchButton } from '@element-plus/icons-vue'
 import {
   createEvaluation,
   deleteEvaluation,
   evaluateWithNsidc,
-  fetchEcmwfPreview,
   getAdminApiError,
   getEvaluationMetadata,
   getEvaluations,
@@ -17,7 +16,6 @@ import {
   type EvaluationMetadata,
   type EvaluationPayload,
   type EvaluationRecord,
-  type EcmwfPreview,
   type ImportMode,
   type NsidcEvaluationResult,
 } from '@/api/admin'
@@ -58,23 +56,6 @@ const importMode = ref<ImportMode>('REJECT')
 const importFile = ref<File | null>(null)
 const importing = ref(false)
 
-const ecmwfVisible = ref(false)
-const ecmwfLoading = ref(false)
-const ecmwfPreview = ref<EcmwfPreview | null>(null)
-const ecmwf = reactive({
-  date: '',
-  time: 0,
-  step: 24,
-  param: '2t',
-  levtype: 'sfc',
-  levelist: undefined as number | undefined,
-  model: 'ifs',
-  provider: 'ecmwf',
-  forecastType: 'fc',
-  reducer: 'MEAN' as 'MEAN' | 'ROW_MEAN' | 'SAMPLE',
-  maxPoints: 200,
-})
-
 const nsidcVisible = ref(false)
 const nsidcLoading = ref(false)
 const nsidcResult = ref<NsidcEvaluationResult | null>(null)
@@ -88,19 +69,6 @@ const nsidc = reactive({
 
 const currentMetadata = computed(() => metadata.value?.categories[activeCategory.value])
 const editorMetadata = computed(() => metadata.value?.categories[form.category])
-const ecmwfSummary = computed(() => {
-  const raw = ecmwfPreview.value?.metadata || {}
-  const fields = Array.isArray(raw.fields) ? raw.fields : []
-  const firstField = (fields[0] || {}) as Record<string, unknown>
-  return {
-    provider: String(raw.source || '—'),
-    forecastDatetime: String(raw.forecastDatetime || '—'),
-    totalGridPoints: String(raw.totalGridPoints || '—'),
-    field: String(firstField.shortName || firstField.name || '—'),
-    units: String(firstField.units || '—'),
-  }
-})
-
 function hasField(category: EvaluationCategory, field: string) {
   const fallback: Record<EvaluationCategory, string[]> = {
     ENSO: ['year', 'data'],
@@ -286,52 +254,6 @@ async function uploadImport() {
   }
 }
 
-function openEcmwf() {
-  // 先挂载独立弹窗，避免 Element Plus 在相邻 dialog 刚销毁时复用旧节点。
-  ecmwfVisible.value = true
-  ecmwfPreview.value = null
-}
-
-async function previewEcmwf() {
-  if (!ecmwf.param.trim()) {
-    ElMessage.warning('请填写 ECMWF 参数短名')
-    return
-  }
-  ecmwfLoading.value = true
-  ecmwfPreview.value = null
-  try {
-    ecmwfPreview.value = await fetchEcmwfPreview({
-      date: ecmwf.date || undefined,
-      time: ecmwf.time,
-      step: ecmwf.step,
-      param: ecmwf.param.trim(),
-      levtype: ecmwf.levtype || undefined,
-      levelist: ecmwf.levelist,
-      model: ecmwf.model,
-      provider: ecmwf.provider,
-      forecastType: ecmwf.forecastType,
-      reducer: ecmwf.reducer,
-      maxPoints: ecmwf.maxPoints,
-    })
-    ElMessage.success('ECMWF 原始场获取与归约成功')
-  } catch (error) {
-    ElMessage.error(getAdminApiError(error, 'ECMWF 获取失败'))
-  } finally {
-    ecmwfLoading.value = false
-  }
-}
-
-function downloadEcmwfPreview() {
-  if (!ecmwfPreview.value) return
-  const blob = new Blob([JSON.stringify(ecmwfPreview.value, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = `ecmwf-raw-preview-${Date.now()}.json`
-  anchor.click()
-  URL.revokeObjectURL(url)
-}
-
 function openNsidc() {
   nsidc.category = activeCategory.value === 'SIE' ? 'SIE' : 'SIC'
   if (nsidc.category === 'SIE') nsidc.year = '2022'
@@ -438,7 +360,6 @@ onMounted(async () => {
       <div class="operations">
         <el-button :icon="Upload" @click="importVisible = true">导入 JSON</el-button>
         <el-button type="warning" plain :icon="Connection" @click="openNsidc">NSIDC 科学评估</el-button>
-        <el-button type="success" plain :icon="Connection" @click="openEcmwf">ECMWF 原始场</el-button>
         <el-button type="primary" :icon="Plus" @click="openCreate">发布数据</el-button>
       </div>
     </section>
@@ -523,7 +444,7 @@ onMounted(async () => {
         show-icon
         title="预测值来自现有 Ice-BCNet / IceTFT；观测值实时取自 NSIDC 官方产品，结果保留版本、URL 与 SHA-256。"
       />
-      <el-form class="ecmwf-form" label-position="top">
+      <el-form class="evaluation-form" label-position="top">
         <div class="form-grid three">
           <el-form-item label="评估类别">
             <el-radio-group v-model="nsidc.category" @change="nsidcResult = null">
@@ -605,50 +526,6 @@ onMounted(async () => {
       </template>
     </el-dialog>
 
-    <el-dialog
-      v-if="ecmwfVisible"
-      key="ecmwf-dialog"
-      v-model="ecmwfVisible"
-      title="ECMWF Open Data 原始场获取与预览"
-      width="820px"
-      destroy-on-close
-    >
-      <el-alert
-        type="warning"
-        :closable="false"
-        show-icon
-        title="这里展示的是 ECMWF 原始预报场的工程归约结果，不是 RMSD、BACC 或相关系数，系统不会把它直接写入评估表。"
-      />
-      <el-form class="ecmwf-form" label-position="top">
-        <div class="form-grid three">
-          <el-form-item label="ECMWF 参数"><el-input v-model="ecmwf.param" placeholder="2t / msl / t / u / v" /></el-form-item>
-          <el-form-item label="起报日期（留空=最新）"><el-input v-model="ecmwf.date" placeholder="YYYY-MM-DD" /></el-form-item>
-          <el-form-item label="起报时次 UTC"><el-select v-model="ecmwf.time"><el-option v-for="time in [0, 6, 12, 18]" :key="time" :label="`${time}:00`" :value="time" /></el-select></el-form-item>
-          <el-form-item label="预报时效（小时）"><el-input-number v-model="ecmwf.step" :min="0" :max="360" /></el-form-item>
-          <el-form-item label="模型"><el-select v-model="ecmwf.model"><el-option label="IFS" value="ifs" /><el-option label="AIFS Single" value="aifs-single" /><el-option label="AIFS ENS" value="aifs-ens" /></el-select></el-form-item>
-          <el-form-item label="数据源"><el-select v-model="ecmwf.provider"><el-option label="ECMWF" value="ecmwf" /><el-option label="AWS" value="aws" /><el-option label="Google" value="google" /><el-option label="Azure" value="azure" /></el-select></el-form-item>
-          <el-form-item label="层类型"><el-input v-model="ecmwf.levtype" placeholder="sfc / pl" /></el-form-item>
-          <el-form-item label="压力层（可选）"><el-input-number v-model="ecmwf.levelist" :min="1" :max="1000" /></el-form-item>
-          <el-form-item label="预览归约规则"><el-select v-model="ecmwf.reducer"><el-option label="未加权网格平均（单值）" value="MEAN" /><el-option label="逐行平均（仅预览）" value="ROW_MEAN" /><el-option label="均匀抽样（仅预览）" value="SAMPLE" /></el-select></el-form-item>
-          <el-form-item v-if="ecmwf.reducer === 'SAMPLE'" label="最大采样点"><el-input-number v-model="ecmwf.maxPoints" :min="1" :max="5000" /></el-form-item>
-        </div>
-        <el-button type="primary" plain :icon="Connection" :loading="ecmwfLoading" @click="previewEcmwf">获取并生成预览</el-button>
-        <template v-if="ecmwfPreview">
-          <el-divider content-position="left">原始场归约预览</el-divider>
-          <el-input :model-value="JSON.stringify(ecmwfPreview.values, null, 2)" type="textarea" :rows="7" readonly />
-          <p class="metadata-line">
-            实际源：{{ ecmwfSummary.provider }} · 起报：{{ ecmwfSummary.forecastDatetime }} ·
-            字段：{{ ecmwfSummary.field }}（{{ ecmwfSummary.units }}）· 网格点：{{ ecmwfSummary.totalGridPoints }} ·
-            转换结果长度：{{ ecmwfPreview.values.length }}
-          </p>
-          <el-alert type="info" :closable="false" :title="ecmwfPreview.notice" />
-        </template>
-      </el-form>
-      <template #footer>
-        <el-button @click="ecmwfVisible = false">取消</el-button>
-        <el-button type="primary" :icon="Download" :disabled="!ecmwfPreview" @click="downloadEcmwfPreview">下载预览 JSON</el-button>
-      </template>
-    </el-dialog>
   </main>
 </template>
 
@@ -672,7 +549,7 @@ code { color: #34536a; font-family: Consolas, monospace; white-space: normal; ov
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; }
 .form-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .form-grid :deep(.el-select), .form-grid :deep(.el-input-number) { width: 100%; }
-.ecmwf-form { margin-top: 20px; }
+.evaluation-form { margin-top: 20px; }
 .metadata-line { color: #657b8d; font-size: 13px; }
 .nsidc-details { margin-top: 16px; }
 @media (max-width: 900px) {
