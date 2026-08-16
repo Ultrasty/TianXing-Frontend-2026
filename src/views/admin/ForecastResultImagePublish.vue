@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { AxiosProgressEvent } from 'axios'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Check, CopyDocument, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { CopyDocument, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { clearAdminSession } from '@/utils/adminAuth'
 import adminRequest from '@/utils/adminRequest'
 import bg from '@/assets/bg.png'
@@ -36,29 +36,12 @@ interface PreviewFile {
   revoke: boolean
 }
 
-interface RemoteUrlCheck {
-  value: string
-  valid: boolean
-  source: string
-  message: string
-}
-
 const fallbackTypeOptions: ImageTypeOption[] = [
   { label: 'ENSO ASC', value: 'ENSO_ASC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
   { label: 'ENSO MC', value: 'ENSO_MC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
   { label: 'ENSO GTC', value: 'ENSO_GTC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
-  { label: '海冰 SIC', value: 'SIC', period: '日', requiresDay: true, description: '海冰密集度预测结果图' },
-  { label: 'NAO 格点图', value: 'NAO', period: '月', requiresDay: false, description: 'NAO 格点预测结果图' },
-  { label: '全球天气 MSLP', value: 'WEA_MSLP', period: '日', requiresDay: true, description: '海平面气压预测结果图' },
-  { label: '全球天气 T2M', value: 'WEA_T2M', period: '日', requiresDay: true, description: '2 米气温预测结果图' },
-  { label: '全球天气 TP', value: 'WEA_TP', period: '日', requiresDay: true, description: '地表降水预测结果图' },
-  { label: '全球天气 U10', value: 'WEA_U10', period: '日', requiresDay: true, description: '10 米风预测结果图' },
 ]
 
-const remoteSourceOptions = [
-  { label: 'ECMWF Charts', value: 'ecmwf', keyword: 'ecmwf', hint: 'charts.ecmwf.int' },
-  { label: 'Copernicus', value: 'copernicus', keyword: 'copernicus', hint: 'copernicus' },
-]
 const allowedImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
 const allowedImagePattern = /\.(png|jpe?g|webp|gif)$/i
 const maxImageSize = 50 * 1024 * 1024
@@ -76,41 +59,19 @@ const manualPreviews = ref<PreviewFile[]>([])
 const currentAdmin = computed(() => localStorage.getItem('tianxing_admin_username') || 'admin')
 
 const form = reactive<{
-  source: 'manual' | 'ecmwfRaw' | 'ecmwfUrl'
-  remoteSource: 'ecmwf' | 'copernicus'
   type: string
   year: number
   month: number
   day: number | undefined
-  imageUrls: string
-  forecastDate: string
-  runHour: number
-  step: number
-  variable: string
-  dataFormat: 'GRIB' | 'NETCDF'
-  dataUrl: string
 }>({
-  source: 'manual',
-  remoteSource: 'ecmwf',
   type: 'ENSO_ASC',
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
   day: undefined,
-  imageUrls: '',
-  forecastDate: new Date().toISOString().slice(0, 10),
-  runHour: 0,
-  step: 24,
-  variable: '2t',
-  dataFormat: 'GRIB',
-  dataUrl: '',
 })
 
 const selectedType = computed(() => imageTypeOptions.value.find((item) => item.value === form.type))
-const selectedRemoteSource = computed(() => remoteSourceOptions.find((item) => item.value === form.remoteSource))
 const requiresDay = computed(() => selectedType.value?.requiresDay || false)
-const imageUrlCount = computed(() => parseImageUrls(form.imageUrls).length)
-const remoteUrlChecks = computed(() => parseImageUrls(form.imageUrls).map(validateRemoteUrl))
-const remoteUrlErrors = computed(() => remoteUrlChecks.value.filter((item) => !item.valid))
 const targetSummary = computed(() => {
   const date = requiresDay.value
     ? `${form.year}年${form.month}月${form.day || '-'}日`
@@ -118,29 +79,8 @@ const targetSummary = computed(() => {
   return `${selectedType.value?.label || form.type} / ${date}`
 })
 const progressText = computed(() => {
-  if (form.source === 'manual') {
-    return progressPercent.value >= 100 ? '图片上传完成' : '正在上传图片'
-  }
-  if (form.source === 'ecmwfRaw') {
-    return progressPercent.value >= 100 ? '原始数据出图完成' : '正在下载并解析 ECMWF 原始数据'
-  }
-  return progressPercent.value >= 100 ? '远程图片拉取完成' : '后端正在拉取远程图片'
+  return progressPercent.value >= 100 ? '图片上传完成' : '正在上传图片'
 })
-
-watch(
-  () => form.type,
-  (type) => {
-    const variableByType: Record<string, string> = {
-      WEA_MSLP: 'msl',
-      WEA_T2M: '2t',
-      WEA_TP: 'tp',
-      WEA_U10: '10u',
-      SIC: 'siconc',
-    }
-    form.variable = variableByType[type] || form.variable
-  },
-  { immediate: true },
-)
 
 onMounted(fetchTypeOptions)
 onBeforeUnmount(releaseManualPreviews)
@@ -194,42 +134,6 @@ async function fetchTypeOptions() {
   }
 }
 
-function parseImageUrls(value: string) {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function validateRemoteUrl(value: string): RemoteUrlCheck {
-  try {
-    const url = new URL(value)
-    if (!['http:', 'https:'].includes(url.protocol)) {
-      return { value, valid: false, source: '-', message: '仅支持 HTTP/HTTPS 地址' }
-    }
-
-    const host = url.hostname.toLowerCase()
-    const option = selectedRemoteSource.value
-    if (!option || !host.includes(option.keyword)) {
-      return {
-        value,
-        valid: false,
-        source: host || '-',
-        message: `当前来源应包含 ${option?.hint || 'ECMWF/Copernicus'} 域名`,
-      }
-    }
-
-    return {
-      value,
-      valid: true,
-      source: option.label,
-      message: '地址可提交',
-    }
-  } catch (_error) {
-    return { value, valid: false, source: '-', message: '地址格式不正确' }
-  }
-}
-
 function validateSelectedFiles() {
   const invalid = fileList.value.find((file) => {
     const type = file.raw?.type
@@ -258,19 +162,11 @@ function validateForm() {
     ElMessage.warning('请填写日期')
     return false
   }
-  if (form.source === 'manual' && fileList.value.length === 0) {
+  if (fileList.value.length === 0) {
     ElMessage.warning('请选择图片文件')
     return false
   }
-  if (form.source === 'manual' && !validateSelectedFiles()) {
-    return false
-  }
-  if (form.source === 'ecmwfUrl' && imageUrlCount.value === 0) {
-    ElMessage.warning('请填写 ECMWF 图片地址')
-    return false
-  }
-  if (form.source === 'ecmwfUrl' && remoteUrlErrors.value.length > 0) {
-    ElMessage.warning(remoteUrlErrors.value[0].message)
+  if (!validateSelectedFiles()) {
     return false
   }
   return true
@@ -283,14 +179,10 @@ async function submitPublish() {
 
   loading.value = true
   lastError.value = ''
-  progressPercent.value = form.source === 'manual' ? 0 : 18
+  progressPercent.value = 0
   published.value = null
   try {
-    const response = form.source === 'manual'
-      ? await publishManual()
-      : form.source === 'ecmwfRaw'
-        ? await publishFromEcmwfRaw()
-        : await publishFromEcmwf()
+    const response = await publishManual()
     published.value = response.data?.data || response.data
     progressPercent.value = 100
     ElMessage.success(response.data?.message || '发布成功')
@@ -323,36 +215,6 @@ function publishManual() {
   })
   return adminRequest.post('/admin/forecast-result-images/manual', data, {
     onUploadProgress: updateUploadProgress,
-  })
-}
-
-function publishFromEcmwf() {
-  progressPercent.value = 36
-  return adminRequest.post('/admin/forecast-result-images/ecmwf', {
-    year: String(form.year),
-    month: String(form.month),
-    day: requiresDay.value && form.day ? String(form.day) : undefined,
-    type: form.type,
-    imageUrls: parseImageUrls(form.imageUrls),
-  })
-}
-
-function publishFromEcmwfRaw() {
-  progressPercent.value = 12
-  return adminRequest.post('/admin/forecast-result-images/ecmwf/raw', {
-    year: String(form.year),
-    month: String(form.month),
-    day: requiresDay.value && form.day ? String(form.day) : undefined,
-    type: form.type,
-    data: {
-      forecastDate: form.forecastDate,
-      runHour: form.runHour,
-      step: form.step,
-      variable: form.variable,
-      format: form.dataFormat,
-      dataUrl: form.dataUrl.trim() || undefined,
-      title: `${selectedType.value?.label || form.type} ${form.forecastDate} +${form.step}h`,
-    },
   })
 }
 
@@ -433,7 +295,7 @@ function releaseManualPreviews() {
       </div>
       <div class="hero-facts">
         <div>
-          <strong>{{ form.source === 'manual' ? '手动上传' : form.source === 'ecmwfRaw' ? '原始数据' : '远程图片' }}</strong>
+          <strong>手动上传</strong>
           <span>来源</span>
         </div>
         <div>
@@ -441,7 +303,7 @@ function releaseManualPreviews() {
           <span>粒度</span>
         </div>
         <div>
-          <strong>{{ form.source === 'manual' ? fileList.length : form.source === 'ecmwfRaw' ? 1 : imageUrlCount }}</strong>
+          <strong>{{ fileList.length }}</strong>
           <span>图片</span>
         </div>
       </div>
@@ -453,7 +315,7 @@ function releaseManualPreviews() {
           <span>1</span>
           <div>
             <strong>来源</strong>
-            <p>{{ form.source === 'manual' ? '本地图片' : form.source === 'ecmwfRaw' ? 'ECMWF GRIB/NetCDF' : '远程图片' }}</p>
+            <p>本地图片</p>
           </div>
         </div>
         <div class="flow-item is-active">
@@ -463,11 +325,11 @@ function releaseManualPreviews() {
             <p>{{ targetSummary }}</p>
           </div>
         </div>
-        <div class="flow-item" :class="{ 'is-active': form.source === 'manual' ? fileList.length > 0 : form.source === 'ecmwfRaw' ? Boolean(form.forecastDate && form.variable) : imageUrlCount > 0 }">
+        <div class="flow-item" :class="{ 'is-active': fileList.length > 0 }">
           <span>3</span>
           <div>
             <strong>发布内容</strong>
-            <p>{{ form.source === 'manual' ? `${fileList.length} 个文件` : form.source === 'ecmwfRaw' ? `${form.variable} / +${form.step}h` : `${imageUrlCount} 个地址` }}</p>
+            <p>{{ `${fileList.length} 个文件` }}</p>
           </div>
         </div>
         <button class="refresh-types" type="button" @click="fetchTypeOptions">
@@ -480,25 +342,6 @@ function releaseManualPreviews() {
       <section class="publish-panel">
         <el-form label-position="top">
           <div class="form-grid">
-          <el-form-item label="来源">
-              <el-radio-group v-model="form.source">
-                <el-radio-button label="manual">手动上传</el-radio-button>
-                <el-radio-button label="ecmwfRaw">原始数据出图</el-radio-button>
-                <el-radio-button label="ecmwfUrl">成品图 URL</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-
-            <el-form-item v-if="form.source === 'ecmwfUrl'" label="远程来源">
-              <el-select v-model="form.remoteSource">
-                <el-option
-                  v-for="item in remoteSourceOptions"
-                  :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
-                />
-              </el-select>
-            </el-form-item>
-
             <el-form-item label="图片类型">
               <el-select v-model="form.type" filterable>
                 <el-option
@@ -523,30 +366,7 @@ function releaseManualPreviews() {
             </el-form-item>
           </div>
 
-          <div v-if="form.source === 'ecmwfRaw'" class="raw-data-grid">
-            <el-form-item label="预报日期">
-              <el-date-picker v-model="form.forecastDate" type="date" value-format="YYYY-MM-DD" />
-            </el-form-item>
-            <el-form-item label="起报时次">
-              <el-select v-model="form.runHour">
-                <el-option v-for="hour in [0, 6, 12, 18]" :key="hour" :label="`${String(hour).padStart(2, '0')} UTC`" :value="hour" />
-              </el-select>
-            </el-form-item>
-            <el-form-item label="预报步长">
-              <el-input-number v-model="form.step" :min="0" :max="360" :step="6" controls-position="right" />
-            </el-form-item>
-            <el-form-item label="数据格式">
-              <el-segmented v-model="form.dataFormat" :options="['GRIB', 'NETCDF']" />
-            </el-form-item>
-            <el-form-item label="变量短名">
-              <el-input v-model="form.variable" placeholder="2t / msl / tp / 10u" />
-            </el-form-item>
-            <el-form-item class="raw-url-field" label="原始数据地址（留空自动生成 Open Data 地址）">
-              <el-input v-model="form.dataUrl" placeholder="https://data.ecmwf.int/forecasts/..." />
-            </el-form-item>
-          </div>
-
-          <el-form-item v-if="form.source === 'manual'" label="图片文件">
+          <el-form-item label="图片文件">
             <el-upload
               v-model:file-list="fileList"
               class="admin-upload"
@@ -564,15 +384,6 @@ function releaseManualPreviews() {
             </el-upload>
           </el-form-item>
 
-          <el-form-item v-else-if="form.source === 'ecmwfUrl'" label="ECMWF 图片地址">
-            <el-input
-              v-model="form.imageUrls"
-              type="textarea"
-              :rows="8"
-              placeholder="https://charts.ecmwf.int/..."
-            />
-          </el-form-item>
-
           <div v-if="manualPreviews.length" class="preview-grid">
             <article v-for="file in manualPreviews" :key="file.uid" class="preview-card">
               <img :src="file.url" :alt="file.name" />
@@ -583,26 +394,9 @@ function releaseManualPreviews() {
             </article>
           </div>
 
-          <div v-if="form.source === 'ecmwfUrl' && remoteUrlChecks.length" class="url-check-list">
-            <div
-              v-for="(item, index) in remoteUrlChecks"
-              :key="`${item.value}-${index}`"
-              class="url-check-row"
-              :class="{ 'is-valid': item.valid, 'is-error': !item.valid }"
-            >
-              <component :is="item.valid ? Check : WarningFilled" />
-              <div>
-                <strong>{{ item.source }}</strong>
-                <p>{{ item.value }}</p>
-                <small>{{ item.message }}</small>
-              </div>
-            </div>
-          </div>
-
           <div v-if="loading || progressPercent > 0" class="publish-progress">
             <el-progress
               :percentage="progressPercent"
-              :indeterminate="loading && form.source !== 'manual'"
               :status="progressPercent >= 100 ? 'success' : undefined"
             />
             <span>{{ progressText }}</span>
@@ -620,7 +414,7 @@ function releaseManualPreviews() {
           <div class="actions">
             <div>
               <strong>{{ targetSummary }}</strong>
-              <span>{{ form.source === 'manual' ? `${fileList.length} 个文件` : form.source === 'ecmwfRaw' ? `${form.variable} / +${form.step}h` : `${imageUrlCount} 个地址` }}</span>
+              <span>{{ `${fileList.length} 个文件` }}</span>
             </div>
             <el-button type="primary" :loading="loading" @click="submitPublish">发布</el-button>
           </div>
@@ -868,16 +662,6 @@ function releaseManualPreviews() {
   width: 100%;
 }
 
-.raw-data-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(150px, 1fr));
-  gap: 14px 18px;
-}
-
-.raw-url-field {
-  grid-column: span 3;
-}
-
 .upload-icon {
   margin-top: 18px;
   font-size: 38px;
@@ -958,58 +742,6 @@ function releaseManualPreviews() {
 }
 
 .preview-meta small {
-  color: #667085;
-}
-
-.url-check-list {
-  display: grid;
-  gap: 10px;
-  margin: 2px 0 18px;
-}
-
-.url-check-row {
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr);
-  gap: 10px;
-  align-items: start;
-  padding: 10px 12px;
-  border-radius: 8px;
-  background: #f7fafc;
-  border: 1px solid #e1ebf3;
-}
-
-.url-check-row svg {
-  margin-top: 2px;
-  width: 16px;
-  height: 16px;
-}
-
-.url-check-row.is-valid svg {
-  color: #16835f;
-}
-
-.url-check-row.is-error svg {
-  color: #c83e4d;
-}
-
-.url-check-row strong,
-.url-check-row p,
-.url-check-row small {
-  display: block;
-  margin: 0;
-}
-
-.url-check-row strong {
-  margin-bottom: 4px;
-}
-
-.url-check-row p {
-  color: #344054;
-  word-break: break-all;
-}
-
-.url-check-row small {
-  margin-top: 4px;
   color: #667085;
 }
 
@@ -1156,14 +888,6 @@ function releaseManualPreviews() {
 
   .form-grid {
     grid-template-columns: 1fr;
-  }
-
-  .raw-data-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .raw-url-field {
-    grid-column: auto;
   }
 
   .brand-text {
