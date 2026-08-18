@@ -2,10 +2,11 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { AxiosProgressEvent } from 'axios'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { CopyDocument, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, ArrowRight, CopyDocument, Delete, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { clearAdminSession } from '@/utils/adminAuth'
 import adminRequest from '@/utils/adminRequest'
+import { preloadImages, resolveImageUrl } from '@/utils/image'
 import bg from '@/assets/bg.png'
 import logoImg from '@/assets/logo-img.png'
 import logoText from '@/assets/logo-txt-b.png'
@@ -36,10 +37,21 @@ interface PreviewFile {
   revoke: boolean
 }
 
+interface ManageModuleOption {
+  value: 'ENSO' | 'NAO' | 'SEA_ICE'
+  label: string
+  requiresDay: boolean
+}
+
 const fallbackTypeOptions: ImageTypeOption[] = [
   { label: 'ENSO ASC', value: 'ENSO_ASC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
   { label: 'ENSO MC', value: 'ENSO_MC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
   { label: 'ENSO GTC', value: 'ENSO_GTC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
+]
+const manageModuleOptions: ManageModuleOption[] = [
+  { label: 'ENSO 模态预测', value: 'ENSO', requiresDay: false },
+  { label: 'NAO 模态预测', value: 'NAO', requiresDay: false },
+  { label: '海冰 SIC 模态预测', value: 'SEA_ICE', requiresDay: true },
 ]
 
 const allowedImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
@@ -56,6 +68,12 @@ const published = ref<PublishedResponse | null>(null)
 const lastError = ref('')
 const progressPercent = ref(0)
 const manualPreviews = ref<PreviewFile[]>([])
+const manageLoading = ref(false)
+const manageDeleting = ref(false)
+const manageError = ref('')
+const managedImages = ref<string[]>([])
+const managedTitles = ref<string[]>([])
+const managedImageIndex = ref(0)
 const currentAdmin = computed(() => localStorage.getItem('tianxing_admin_username') || 'admin')
 
 const form = reactive<{
@@ -70,8 +88,22 @@ const form = reactive<{
   day: undefined,
 })
 
+const manageForm = reactive<{
+  module: 'ENSO' | 'NAO' | 'SEA_ICE'
+  year: number
+  month: number
+  day: number | undefined
+}>({
+  module: 'ENSO',
+  year: new Date().getFullYear(),
+  month: new Date().getMonth() + 1,
+  day: undefined,
+})
+
 const selectedType = computed(() => imageTypeOptions.value.find((item) => item.value === form.type))
+const selectedManageModule = computed(() => manageModuleOptions.find((item) => item.value === manageForm.module))
 const requiresDay = computed(() => selectedType.value?.requiresDay || false)
+const manageRequiresDay = computed(() => selectedManageModule.value?.requiresDay || false)
 const targetSummary = computed(() => {
   const date = requiresDay.value
     ? `${form.year}年${form.month}月${form.day || '-'}日`
@@ -81,6 +113,8 @@ const targetSummary = computed(() => {
 const progressText = computed(() => {
   return progressPercent.value >= 100 ? '图片上传完成' : '正在上传图片'
 })
+const currentManagedImage = computed(() => resolveImageUrl(managedImages.value[managedImageIndex.value]))
+const currentManagedTitle = computed(() => managedTitles.value[managedImageIndex.value] || selectedManageModule.value?.label || '当前预报结果图')
 
 onMounted(fetchTypeOptions)
 onBeforeUnmount(releaseManualPreviews)
@@ -97,6 +131,24 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => manageForm.module,
+  () => {
+    if (!manageRequiresDay.value) {
+      manageForm.day = undefined
+    } else if (!manageForm.day) {
+      manageForm.day = 1
+    }
+    clearManagedImages()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [manageForm.year, manageForm.month, manageForm.day],
+  clearManagedImages,
 )
 
 watch(
@@ -224,6 +276,131 @@ function updateUploadProgress(event: AxiosProgressEvent) {
     return
   }
   progressPercent.value = Math.min(95, Math.max(1, Math.round((event.loaded * 100) / event.total)))
+}
+
+function clearManagedImages() {
+  managedImages.value = []
+  managedTitles.value = []
+  managedImageIndex.value = 0
+  manageError.value = ''
+}
+
+function validateManageForm() {
+  if (!manageForm.year || !manageForm.month) {
+    ElMessage.warning('请填写要管理的年份和月份')
+    return false
+  }
+  if (manageRequiresDay.value && !manageForm.day) {
+    ElMessage.warning('请填写海冰 SIC 日期')
+    return false
+  }
+  return true
+}
+
+async function loadManagedImages() {
+  if (!validateManageForm()) return
+
+  manageLoading.value = true
+  manageError.value = ''
+  managedImages.value = []
+  managedTitles.value = []
+  managedImageIndex.value = 0
+
+  try {
+    if (manageForm.module === 'ENSO') {
+      const response = await adminRequest.get('/imgs/predictionResult/ssta', {
+        params: { year: manageForm.year, month: manageForm.month },
+      })
+      managedImages.value = Array.isArray(response.data?.data)
+        ? response.data.data.filter((item: unknown) => typeof item === 'string' && item)
+        : []
+      managedTitles.value = Array.isArray(response.data?.titles) ? response.data.titles : []
+    } else if (manageForm.module === 'NAO') {
+      const response = await adminRequest.get('/nao/findGridData/nao', {
+        params: { year: manageForm.year, month: manageForm.month },
+      })
+      managedImages.value = Array.isArray(response.data)
+        ? response.data.filter((item: unknown) => typeof item === 'string' && item)
+        : []
+      managedTitles.value = managedImages.value.map(() => `${manageForm.year}年${manageForm.month}月 北大西洋SLP预测结果`)
+    } else {
+      const response = await adminRequest.get('/seaice/predictionResult/SIC', {
+        params: { year: manageForm.year, month: manageForm.month, day: manageForm.day },
+      })
+      managedImages.value = Array.isArray(response.data)
+        ? response.data.filter((item: unknown) => typeof item === 'string' && item)
+        : []
+      managedTitles.value = managedImages.value.map(() => `${manageForm.year}年${manageForm.month}月${manageForm.day}日 海冰SIC预测结果`)
+    }
+
+    if (managedImages.value.length > 0) {
+      preloadImages(managedImages.value)
+    }
+  } catch (error: any) {
+    manageError.value = error?.response?.data?.message || error?.response?.data?.error || error?.message || '预报结果图加载失败'
+    ElMessage.error(manageError.value)
+  } finally {
+    manageLoading.value = false
+  }
+}
+
+function currentManageType() {
+  if (manageForm.module === 'NAO') return 'NAO'
+  if (manageForm.module === 'SEA_ICE') return 'SIC'
+
+  const title = currentManagedTitle.value
+  if (title.includes('ENSO_MC')) return 'ENSO_MC'
+  if (title.includes('ENSO_GTC')) return 'ENSO_GTC'
+  return 'ENSO_ASC'
+}
+
+function changeManagedImage(direction: 'left' | 'right') {
+  const total = managedImages.value.length
+  if (total < 2) return
+  managedImageIndex.value = direction === 'left'
+    ? (managedImageIndex.value - 1 + total) % total
+    : (managedImageIndex.value + 1) % total
+}
+
+async function deleteCurrentManagedImage() {
+  const imagePath = managedImages.value[managedImageIndex.value]
+  if (!imagePath || !validateManageForm()) {
+    ElMessage.warning('请先加载并选择要删除的图片')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除当前展示的 ${currentManagedTitle.value} 吗？删除后将无法恢复。`,
+      '删除当前预报结果图',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        draggable: true,
+      },
+    )
+
+    manageDeleting.value = true
+    const response = await adminRequest.post('/admin/forecast-result-images/delete-image', {
+      year: String(manageForm.year),
+      month: String(manageForm.month),
+      day: manageRequiresDay.value && manageForm.day ? String(manageForm.day) : undefined,
+      type: currentManageType(),
+      imagePath,
+    })
+    ElMessage.success(response.data?.message || '当前预报结果图删除成功')
+    const nextIndex = managedImageIndex.value > 0 ? managedImageIndex.value - 1 : 0
+    await loadManagedImages()
+    managedImageIndex.value = Math.min(nextIndex, Math.max(0, managedImages.value.length - 1))
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      const message = error?.response?.data?.message || error?.response?.data?.error || '当前预报结果图删除失败'
+      ElMessage.error(message)
+    }
+  } finally {
+    manageDeleting.value = false
+  }
 }
 
 async function logout() {
@@ -420,6 +597,66 @@ function releaseManualPreviews() {
           </div>
         </el-form>
       </section>
+    </section>
+
+    <section class="manage-panel">
+      <header>
+        <div>
+          <strong>模态预测图管理</strong>
+          <span>仅管理员可删除当前展示的模态预测图片</span>
+        </div>
+        <el-button type="primary" plain :loading="manageLoading" @click="loadManagedImages">加载图片</el-button>
+      </header>
+
+      <div class="manage-form-grid">
+        <el-form-item label="模块">
+          <el-select v-model="manageForm.module">
+            <el-option
+              v-for="item in manageModuleOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="年份">
+          <el-input-number v-model="manageForm.year" :min="1900" :max="2200" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="月份">
+          <el-input-number v-model="manageForm.month" :min="1" :max="12" controls-position="right" />
+        </el-form-item>
+        <el-form-item v-if="manageRequiresDay" label="日期">
+          <el-input-number v-model="manageForm.day" :min="1" :max="31" controls-position="right" />
+        </el-form-item>
+      </div>
+
+      <div v-if="manageError" class="error-panel manage-error">
+        <WarningFilled />
+        <div>
+          <strong>加载失败</strong>
+          <p>{{ manageError }}</p>
+        </div>
+        <el-button text type="primary" :icon="Refresh" :disabled="manageLoading" @click="loadManagedImages">重试</el-button>
+      </div>
+
+      <div v-if="managedImages.length" class="managed-preview">
+        <div class="managed-image-box">
+          <img :src="currentManagedImage" :alt="currentManagedTitle" />
+          <template v-if="managedImages.length > 1">
+            <el-button class="managed-arrow left" type="primary" :icon="ArrowLeft" aria-label="上一张" @click="changeManagedImage('left')" />
+            <el-button class="managed-arrow right" type="primary" :icon="ArrowRight" aria-label="下一张" @click="changeManagedImage('right')" />
+          </template>
+        </div>
+        <div class="managed-meta">
+          <strong>{{ currentManagedTitle }}</strong>
+          <span>{{ managedImageIndex + 1 }}/{{ managedImages.length }}</span>
+          <code>{{ managedImages[managedImageIndex] }}</code>
+          <el-button type="danger" :icon="Delete" :loading="manageDeleting" @click="deleteCurrentManagedImage">
+            删除当前展示图片
+          </el-button>
+        </div>
+      </div>
+      <el-empty v-else-if="!manageLoading && !manageError" description="请选择模块和时间后加载模态预测图片" />
     </section>
 
     <section v-if="published" class="result-panel">

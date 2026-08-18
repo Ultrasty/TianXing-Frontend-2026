@@ -2,8 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 import VChart from 'vue-echarts'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import bannerImg from '@/assets/nao.jpg'
 import { preloadImages, resolveImageUrl } from '@/utils/image'
 import { requestErrorMessage } from '@/utils/requestError'
@@ -39,14 +38,6 @@ const slpTitle = computed(() => {
   if (!date) return '北大西洋 SLP 预测结果'
   return `${date.getFullYear()}年${date.getMonth() + 1}月 北大西洋SLP预测结果`
 })
-const naoForecastLabel = computed(() => {
-  const date = selectedDates.value[chartSelected.value]
-  if (!date) return '当前 NAO 预测结果'
-  return chartSelected.value === 0
-    ? `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月 NAO预测结果`
-    : `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月 北大西洋SLP预测结果`
-})
-
 function createMonth(yearValue, monthValue) {
   const year = Number(yearValue)
   const month = Number(monthValue)
@@ -227,41 +218,6 @@ function retryActive() {
   return chartSelected.value === 0 ? updateNaoi() : updateSlp()
 }
 
-async function deleteForecastResult() {
-  const date = selectedDates.value[chartSelected.value]
-  if (!date) return
-
-  try {
-    await ElMessageBox.confirm(
-      `确认删除 ${naoForecastLabel.value} 吗？删除后将无法恢复。`,
-      '删除预报结果图',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        draggable: true,
-      },
-    )
-
-    const payload = {
-      year: String(date.getFullYear()),
-      month: String(date.getMonth() + 1),
-      day: null,
-      type: 'NAO',
-      imagePath: slpImages.value[slpImageIndex.value],
-    }
-
-    const { data } = await axios.post('/admin/forecast-result-images/delete-image', payload)
-    ElMessage.success(data?.message || '预报结果图删除成功')
-    await retryActive()
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('删除预报结果图失败', error)
-      ElMessage.error(error?.response?.data?.message || '删除预报结果图失败')
-    }
-  }
-}
-
 function changeImageIndex(direction) {
   const total = slpImages.value.length
   if (total < 2) return
@@ -311,12 +267,6 @@ onMounted(() => {
           :disabled-date="limitedDateRange"
           @change="handleDateChange"
         />
-      </div>
-
-      <div v-if="chartSelected === 1" class="result-actions">
-        <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
-          删除预报结果图
-        </el-button>
       </div>
 
       <div v-if="chartSelected === 0 && naoiDescription" class="description">

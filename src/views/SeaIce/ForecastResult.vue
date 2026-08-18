@@ -2,8 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 import VChart from 'vue-echarts'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import bannerImg from '@/assets/Ice.jpg'
 import { preloadImages, resolveImageUrl } from '@/utils/image'
 import { requestErrorMessage } from '@/utils/requestError'
@@ -46,18 +45,6 @@ const sicTitle = computed(() => {
   if (!date) return '海冰 SIC 预测结果'
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 海冰SIC预测结果`
 })
-const seaIceForecastLabel = computed(() => {
-  if (chartSelected.value === 0) {
-    const date = selectedSieDate.value
-    if (!date) return '当前海冰预测结果'
-    return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月 海冰预测结果`
-  }
-
-  const date = selectedSicDate.value
-  if (!date) return '当前海冰 SIC 预测结果'
-  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 海冰SIC预测结果`
-})
-
 function toNumber(value) {
   const number = Number(value)
   return Number.isInteger(number) ? number : null
@@ -346,41 +333,6 @@ function retryActive() {
   return sicAvailableDates.value.length ? updateSicChart() : initializeSic()
 }
 
-async function deleteForecastResult() {
-  const date = selectedDates.value[chartSelected.value]
-  if (!date) return
-
-  try {
-    await ElMessageBox.confirm(
-      `确认删除 ${seaIceForecastLabel.value} 吗？删除后将无法恢复。`,
-      '删除预报结果图',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        draggable: true,
-      },
-    )
-
-    const payload = {
-      year: String(date.getFullYear()),
-      month: String(date.getMonth() + 1),
-      day: String(date.getDate()),
-      type: 'SIC',
-      imagePath: sicImages.value[sicImageIndex.value],
-    }
-
-    const { data } = await axios.post('/admin/forecast-result-images/delete-image', payload)
-    ElMessage.success(data?.message || '预报结果图删除成功')
-    await retryActive()
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('删除预报结果图失败', error)
-      ElMessage.error(error?.response?.data?.message || '删除预报结果图失败')
-    }
-  }
-}
-
 function changeImageIndex(direction) {
   const total = sicImages.value.length
   if (total < 2) return
@@ -430,12 +382,6 @@ onMounted(async () => {
           :disabled-date="disabledDate"
           @change="handleDateChange"
         />
-      </div>
-
-      <div v-if="chartSelected === 1" class="result-actions">
-        <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
-          删除预报结果图
-        </el-button>
       </div>
 
       <div v-if="chartSelected === 0 && sieDescription" class="description">

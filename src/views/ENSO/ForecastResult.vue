@@ -2,8 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import axios from 'axios'
 import VChart from 'vue-echarts'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, Delete } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import bannerImg from '@/assets/enso1.jpg'
 import { preloadImages, resolveImageUrl } from '@/utils/image'
 import { requestErrorMessage } from '@/utils/requestError'
@@ -39,12 +38,6 @@ const activeRange = computed(() => dateRanges.value[chartSelected.value])
 const currentHeatImage = computed(() => resolveImageUrl(heatImages.value[heatIndex.value]))
 const currentHeatTitle = computed(() => heatTitles.value[heatIndex.value] || '')
 const hasIndexChart = computed(() => Object.keys(chart1.value || {}).length > 0)
-const forecastPeriodLabel = computed(() => {
-  const date = selectedDates.value[chartSelected.value]
-  if (!date) return '当前预报结果'
-  return `${date.getFullYear()}年${String(date.getMonth() + 1).padStart(2, '0')}月`
-})
-
 function parseYearMonth(value) {
   const match = /^(\d{4})-(\d{1,2})$/.exec(String(value || '').trim())
   if (!match) return null
@@ -190,48 +183,6 @@ function loadActiveData() {
   return chartSelected.value === 0 ? loadIndexChart() : loadModeImages()
 }
 
-function currentEnsoModeType() {
-  const title = currentHeatTitle.value
-  if (title.includes('ENSO_MC')) return 'ENSO_MC'
-  if (title.includes('ENSO_GTC')) return 'ENSO_GTC'
-  return 'ENSO_ASC'
-}
-
-async function deleteForecastResult() {
-  const date = selectedDates.value[1]
-  if (!date) return
-
-  try {
-    await ElMessageBox.confirm(
-      `确认删除 ${forecastPeriodLabel.value} 的预报结果图吗？删除后将无法恢复。`,
-      '删除预报结果图',
-      {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning',
-        draggable: true,
-      },
-    )
-
-    const payload = {
-      year: String(date.getFullYear()),
-      month: String(date.getMonth() + 1),
-      day: null,
-      type: currentEnsoModeType(),
-      imagePath: heatImages.value[heatIndex.value],
-    }
-
-    const { data } = await axios.post('/admin/forecast-result-images/delete-image', payload)
-    ElMessage.success(data?.message || '预报结果图删除成功')
-    await loadModeImages()
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('删除预报结果图失败', error)
-      ElMessage.error(error?.response?.data?.message || '删除预报结果图失败')
-    }
-  }
-}
-
 async function selectChart(index) {
   chartSelected.value = index
   if (!activeRange.value?.start) {
@@ -306,12 +257,6 @@ onMounted(async () => {
           :disabled-date="limitedDateRange"
           @change="handleDateChange"
         />
-      </div>
-
-      <div v-if="chartSelected === 1" class="result-actions">
-        <el-button type="danger" plain :icon="Delete" class="delete-btn" @click="deleteForecastResult">
-          删除预报结果图
-        </el-button>
       </div>
 
       <div v-if="rangeErrors[chartSelected]" class="state-panel">
