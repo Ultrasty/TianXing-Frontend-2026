@@ -6,20 +6,20 @@
 
 ## 1. SIC日预测误差
 
-**接口信息**  
+**接口信息**
 
-- 路径：`/seaice/error`  
-- 方法：`GET`  
+- 路径：`/seaice/error`
+- 方法：`GET`
 - 功能：获取指定起报年份和月份的 SIC 日预测误差数据（BACC 和 RMSE），用于绘制折线图。
 
-**请求参数**  
+**请求参数**
 
 | 参数名 | 类型 | 必填 | 说明 | 示例 |
 | ------ | ---- | ---- | ---- | ---- |
 | `year` | int | 是 | 起报年份 | `2023` |
 | `month` | int | 是 | 起报月份（1~12） | `1` |
 
-**响应格式**  
+**响应格式**
 
 ```json
 {
@@ -34,8 +34,8 @@
 - 字段名中的 `{year}` 需替换为请求参数中的实际年份。
 - 数组中每个值对应一个样本（如第1天、第2天……）。
 
-**示例**  
-请求：`GET /seaice/error?year=2023&month=1`  
+**示例**
+请求：`GET /seaice/error?year=2023&month=1`
 响应：
 [json]
 {
@@ -50,20 +50,20 @@
 
 ## 2. SIC误差统计（箱型图）
 
-**接口信息**  
+**接口信息**
 
-- 路径：`/seaice/errorBox`  
-- 方法：`GET`  
+- 路径：`/seaice/errorBox`
+- 方法：`GET`
 - 功能：获取指定起报年份和月份的 SIC 误差统计数据，用于绘制箱型图。
 
-**请求参数**  
+**请求参数**
 
 | 参数名 | 类型 | 必填 | 说明 | 示例 |
 | ------ | ---- | ---- | ---- | ---- |
 | `year` | int | 是 | 起报年份 | `2022` |
 | `month` | int | 是 | 起报月份（1~12） | `4` |
 
-**响应格式**  
+**响应格式**
 
 ```json
 {
@@ -78,8 +78,8 @@
 - 内层数组长度通常为 7（提前1~7天），但可以是其他固定长度。
 - RMSE 值为比例，前端会乘以100显示为百分比。
 
-**示例**  
-请求：`GET /seaice/errorBox?year=2022&month=4`  
+**示例**
+请求：`GET /seaice/errorBox?year=2022&month=4`
 响应：
 
 ```json
@@ -111,19 +111,19 @@
 
 ## 3. SIE误差分析
 
-**接口信息**  
+**接口信息**
 
-- 路径：`/seaice/predictionExamination/errorAnalysis`  
-- 方法：`GET`  
+- 路径：`/seaice/predictionExamination/errorAnalysis`
+- 方法：`GET`
 - 功能：获取指定年份的 SIE 误差分析数据，用于绘制4个子图（RMSD、偏差/方差、相关系数、标准差）。
 
-**请求参数**  
+**请求参数**
 
 | 参数名 | 类型 | 必填 | 说明 | 示例 |
 | ------ | ---- | ---- | ---- | ---- |
 | `year` | int | 是 | 分析年份 | `2022` |
 
-**响应格式**  
+**响应格式**
 
 ```json
 {
@@ -139,8 +139,8 @@
 - 所有字段均为**长度为 12 的数组**，分别对应提前 1~12 个月。
 - 数值单位：RMSD、OBS_STD、PRE_STD 单位为百万 km²；BAIS 和 VAR 单位为 (百万 km²)²；CORRELATION 无量纲。
 
-**示例**  
-请求：`GET /seaice/predictionExamination/errorAnalysis?year=2022`  
+**示例**
+请求：`GET /seaice/predictionExamination/errorAnalysis?year=2022`
 响应：
 [json]
 {
