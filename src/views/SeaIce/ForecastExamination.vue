@@ -41,6 +41,18 @@ const selectedTime = computed({
   },
 })
 const activeCharts = computed(() => tabCharts.value[chartSelected.value] || [])
+const selectedYear = computed(() => selectedDates.value[0]?.getFullYear() ?? new Date().getFullYear())
+const selectedMonth = computed(() => (selectedDates.value[0]?.getMonth() ?? 0) + 1)
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isInteger(number) ? number : null
+}
+
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
 
 const start_year1 = ref(null);
 const start_month1 = ref(null);
