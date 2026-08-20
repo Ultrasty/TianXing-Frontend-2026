@@ -74,6 +74,12 @@ const router = createRouter({
                     },
                     path: 'NAO_ForecastExamination',
                     component: NAOForecastExamination,
+                },
+                {
+                    name: 'ExaminationManage',
+                    path: '/admin/evaluations',
+                    meta: { title: '预报评估数据管理', requiresAdmin: true },
+                    component: () => import('@/views/admin/ExaminationManage.vue'),
                 }
             ],
         },
@@ -82,13 +88,7 @@ const router = createRouter({
             path: '/admin/login',
             meta: { title: '管理员登录', guestOnly: true },
             component: () => import('@/views/admin/Login.vue'),
-        },
-        {
-            name: 'ExaminationManage',
-            path: '/admin/evaluations',
-            meta: { title: '预报评估数据管理', requiresAdmin: true },
-            component: () => import('@/views/admin/ExaminationManage.vue'),
-        },
+        }
     ],
 })
 

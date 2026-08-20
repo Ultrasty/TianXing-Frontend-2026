@@ -1,4 +1,5 @@
 <script setup>
+// ===== 原有导入 =====
 import { ref, onMounted, reactive, watch, defineExpose, computed } from "vue";
 import * as echarts from "echarts";
 import axios from "axios";
@@ -9,9 +10,15 @@ import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
 import bannerImg from '@/assets/nao.jpg';//首页图
 
 const prefix = "https://tianxing.tongji.edu.cn"
+
 // 新加入
 const chartSelected = ref(0);
-const chartNames = ['指数预测', '模态预测'];
+// 添加 '评估指标'
+const chartNames = ['指数预测', '模态预测', '评估指标'];
+
+// 评估数据图表相关变量
+const optionEvaluation = ref({});          // ECharts 配置对象
+const evaluationDescription = ref('NAO预测评估指标（相关系数/均方根误差等）趋势');
 
 //时间选择器范围框定--start
 const start_year = ref(null);
@@ -43,10 +50,8 @@ const limitedDateRange = (time) => {
   return time.getFullYear() < start_year.value || time.getFullYear() > end_year.value;
 };
 
-
 const text_of_option1 = ref('预测误差主要来自于对中纬度和冰岛附近低压的高估，能够预测出NAO的典型两级模态 ，模拟误差随着预测时长逐渐增加。')//表示前六个图底下的文字描述
 const text_of_option7 = ref('对于为期1个月的NAOI预测，不如高分辨率模式ECMWF ，但与低分辨率模式ECCC相当。由于只接受月平均数作为输入，忽略了决定短时尺度可预测性的天气现象和初始条件。在超过两个月的提前期的预测技巧远远超过了失去预测能力的数值模式，将NAO的有效预测时间从1个月扩展到了6个月。')
-
 
 var index_nao = 0; //切换气温预测时修改这个索引
 var imgSrc_of_nao_Array;
@@ -55,6 +60,31 @@ const imgSrc_of_nao = ref({})
 const title_of_nao = ref({})
 
 const option7 = ref({})
+
+// 加载评估数据的函数
+const loadEvaluationData = () => {
+  // 等待后端API
+
+  // 目前使用模拟数据（可替换）
+  const mockYears = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024'];
+  const mockValues = [0.72, 0.68, 0.74, 0.80, 0.77, 0.82, 0.79, 0.85, 0.88, 0.83];
+  const option = {
+    title: { text: 'NAO预测相关系数（逐年起报）', left: 'center' },
+    tooltip: { trigger: 'axis' },
+    xAxis: { type: 'category', data: mockYears, name: '起报年份' },
+    yAxis: { type: 'value', min: 0, max: 1, name: '相关系数' },
+    series: [
+      {
+        type: 'line',
+        data: mockValues,
+        smooth: true,
+        lineStyle: { width: 3 },
+        areaStyle: { opacity: 0.1 }
+      }
+    ]
+  };
+  optionEvaluation.value = option;
+};
 
 function updateChartTitle() {
   //使元素失焦
@@ -82,6 +112,11 @@ function updateChartTitle() {
     .catch(error => {
       console.error(error);
     });
+
+  // 重新加载评估数据
+  if (chartSelected.value === 2) {
+    loadEvaluationData();
+  }
 }
 
 //////////以下两个是初始化
@@ -128,6 +163,10 @@ function change_time_nao(flag) {
 //换成新的选项卡
 function selectChart(index) {
   chartSelected.value = index;
+  // 切换到评估tab时加载数据
+  if (index === 2) {
+    loadEvaluationData();
+  }
 }
 
 const moveBoxLeft = computed(() => {
@@ -146,6 +185,10 @@ const movBoxStyle = computed(() => ({
   //backgroundColor: "rgb(92,179,204)",
   transition: "left 0.3s ease"
 }));
+
+onMounted(() => {
+  loadEvaluationData();
+});
 </script>
 
 <template>
@@ -165,8 +208,6 @@ const movBoxStyle = computed(() => ({
       </ul>
     </div>
 
-
-
     <div style="margin: 0px 10%;">
 
       <div class="datePickerContainer">
@@ -183,6 +224,16 @@ const movBoxStyle = computed(() => ({
       <div class="text-container" v-if="chartSelected === 1">
         <div class="description1">
           {{ text_of_option7 }}
+        </div>
+      </div>
+
+      <!-- 评估指标描述 -->
+      <div class="text-container" v-if="chartSelected === 2">
+        <div class="description1">
+          {{ evaluationDescription }}
+          <span style="font-size:14px; color:#888; display:block; margin-top:5px;">
+            （当前展示模拟数据，实际数据待后端接口 `/nao/evaluation` 就绪后自动替换）
+          </span>
         </div>
       </div>
     </div>
@@ -215,6 +266,12 @@ const movBoxStyle = computed(() => ({
       <!-- </div> -->
     </div>
 
+    <!-- 评估指标图表 -->
+    <div class="chart-selector" v-else-if="chartSelected === 2">
+      <div class="chart">
+        <v-chart :option="optionEvaluation" autoresize></v-chart>
+      </div>
+    </div>
 
   </div>
 </template>
