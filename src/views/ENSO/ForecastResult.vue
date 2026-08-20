@@ -1,441 +1,529 @@
 <script setup>
-import { ref, reactive, computed, defineExpose } from "vue";
-import * as echarts from "echarts";
-import axios from "axios";
-import VChart from 'vue-echarts';
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue';
-import bannerImg from '@/assets/enso1.jpg';
+import { computed, onMounted, ref } from 'vue'
+import axios from 'axios'
+import VChart from 'vue-echarts'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import bannerImg from '@/assets/enso1.jpg'
+import { preloadImages, resolveImageUrl } from '@/utils/image'
+import { requestErrorMessage } from '@/utils/requestError'
 
-const prefix = "https://tianxing.tongji.edu.cn";
+const chartNames = ['指数预测', '模态预测']
+const chartSelected = ref(0)
 
-// ====================== 时间选择器范围框定 START ======================
-const start_time = ref(null);
-const end_time = ref(null);
+const dateRanges = ref([
+  { start: null, end: null },
+  { start: null, end: null },
+])
+const selectedDates = ref([null, null])
+const rangeLoading = ref([false, false])
+const rangeErrors = ref(['', ''])
+const dataLoading = ref([false, false])
+const dataErrors = ref(['', ''])
+const rangeRequestIds = [0, 0]
+const requestIds = [0, 0]
 
-// 分别保存原始时间范围
-const indexStart = ref(null);
-const indexEnd = ref(null);
-const modeStart = ref(null);
-const modeEnd = ref(null);
+const chart1 = ref({})
+const chart1Description = ref('此处为预测结果指数预测折线图。')
+const heatImages = ref([])
+const heatTitles = ref([])
+const heatIndex = ref(0)
 
-// 获取指数预测时间范围
-axios.get('/enso/linechart/getInitData')
-  .then(res => {
-    if (res.data?.earliestDate && res.data?.latestDate) {
-      indexStart.value = new Date(res.data.earliestDate.replace(/-/g, '/'));
-      indexEnd.value = new Date(res.data.latestDate.replace(/-/g, '/'));
-      computeIntersection();
-    } else {
-      console.warn("获取指数预测时间范围失败", res.data);
+const currentDate = computed({
+  get: () => selectedDates.value[chartSelected.value],
+  set: (value) => {
+    selectedDates.value[chartSelected.value] = value
+  },
+})
+const activeRange = computed(() => dateRanges.value[chartSelected.value])
+const currentHeatImage = computed(() => resolveImageUrl(heatImages.value[heatIndex.value]))
+const currentHeatTitle = computed(() => heatTitles.value[heatIndex.value] || '')
+const hasIndexChart = computed(() => Object.keys(chart1.value || {}).length > 0)
+
+function parseYearMonth(value) {
+  const match = /^(\d{4})-(\d{1,2})$/.exec(String(value || '').trim())
+  if (!match) return null
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  if (month < 1 || month > 12) return null
+  return new Date(year, month - 1, 1)
+}
+
+function monthNumber(date) {
+  return date.getFullYear() * 12 + date.getMonth()
+}
+
+function isWithinRange(date, range) {
+  if (!date || !range?.start || !range?.end) return false
+  const value = monthNumber(date)
+  return value >= monthNumber(range.start) && value <= monthNumber(range.end)
+}
+
+function limitedDateRange(time) {
+  if (!activeRange.value?.start || !activeRange.value?.end) return false
+  return !isWithinRange(time, activeRange.value)
+}
+
+async function loadRange(index) {
+  const requestId = ++rangeRequestIds[index]
+  const isIndexTab = index === 0
+  rangeLoading.value[index] = true
+  rangeErrors.value[index] = ''
+
+  try {
+    const response = await axios.get(
+      isIndexTab
+        ? '/enso/linechart/getInitData'
+        : '/imgs/predictionResult/ssta/getInitData',
+    )
+    if (requestId !== rangeRequestIds[index]) return
+
+    const start = parseYearMonth(
+      isIndexTab ? response.data?.earliestDate : response.data?.start,
+    )
+    const end = parseYearMonth(
+      isIndexTab ? response.data?.latestDate : response.data?.end,
+    )
+
+    if (!start || !end || monthNumber(start) > monthNumber(end)) {
+      throw new Error('Invalid ENSO date range')
     }
-  });
 
-// 获取模态预测时间范围
-axios.get('/imgs/predictionResult/ssta/getInitData')
-  .then(res => {
-    if (res.data?.start && res.data?.end) {
-      modeStart.value = new Date(res.data.start.replace(/-/g, '/'));
-      modeEnd.value = new Date(res.data.end.replace(/-/g, '/'));
-      computeIntersection();
-    } else {
-      console.warn("获取模态预测时间范围失败", res.data);
+    dateRanges.value[index] = { start, end }
+    if (!isWithinRange(selectedDates.value[index], dateRanges.value[index])) {
+      selectedDates.value[index] = new Date(end)
     }
-  });
-
-// 计算交集
-function computeIntersection() {
-  if (indexStart.value && indexEnd.value && modeStart.value && modeEnd.value) {
-    start_time.value = new Date(Math.max(indexStart.value, modeStart.value));
-    end_time.value = new Date(Math.min(indexEnd.value, modeEnd.value));
+  } catch (error) {
+    if (requestId !== rangeRequestIds[index]) return
+    dateRanges.value[index] = { start: null, end: null }
+    rangeErrors.value[index] = requestErrorMessage(
+      error,
+      `${chartNames[index]}可选日期加载失败`,
+    )
+  } finally {
+    if (requestId === rangeRequestIds[index]) {
+      rangeLoading.value[index] = false
+    }
   }
 }
 
-// 限制可选日期
-const limitedDateRange = (time) => {
-  if (!start_time.value || !end_time.value) return true;
-  return time.getTime() < start_time.value.getTime() || time.getTime() > end_time.value.getTime();
-};
+async function loadIndexChart() {
+  const date = selectedDates.value[0]
+  if (!date) return
 
-// 切换时只改 tab，不改时间范围
-function handleClick(chartName, index) {
-  chartSelected.value = index;
-  console.log(`切换到 ${chartName}`);
-}
-// ====================== 时间选择器范围框定 END ======================
+  const requestId = ++requestIds[0]
+  dataLoading.value[0] = true
+  dataErrors.value[0] = ''
+  chart1.value = {}
 
-
-// ====================== 时间 & 图表初始值 ======================
-const currentDate = ref(new Date(2025, 0));   // 初始日期
-const start_year = computed(() => currentDate.value.getFullYear());
-const start_month = computed(() => currentDate.value.getMonth() + 1);
-
-const chart1 = ref({});
-const chart1Title = ref('**年*月~**年*月Niño3.4指数结果预测');
-let Chart1_Description = reactive({ single: true, text: '此处为预测结果指数预测折线图。' });
-
-var index_heat = 0;
-var imgSrc_of_heat_Array;
-var title_of_heat_Array;
-
-const imgSrc_of_heat = ref({});
-const title_of_heat = ref({});
-
-// ====================== 初始化数据 ======================
-// 指数预测
-axios.get(`/enso/predictionResult/linechart?year=${start_year.value}&month=${start_month.value}`)
-  .then(res => {
-    chart1.value = res.data;
-  });
-
-// 模态预测（热力图）
-axios.get(`/imgs/predictionResult/ssta?year=${start_year.value}&month=${start_month.value}`)
-  .then(res => {
-    index_heat = 0;
-    imgSrc_of_heat_Array = res.data.data;
-    imgSrc_of_heat.value = `${prefix}${imgSrc_of_heat_Array[0]}`;
-    title_of_heat_Array = res.data.titles;
-    title_of_heat.value = title_of_heat_Array[0];
-  });
-
-// ====================== 图表更新 ======================
-function update_charts() {
-  document.activeElement.blur(); // 失焦
-
-  axios.get(`/enso/predictionResult/linechart?year=${start_year.value}&month=${start_month.value}`)
-    .then(res => {
-      chart1.value = res.data;
-    });
-
-  axios.get(`/imgs/predictionResult/ssta?year=${start_year.value}&month=${start_month.value}`)
-    .then(res => {
-      index_heat = 0;
-      imgSrc_of_heat_Array = res.data.data;
-      imgSrc_of_heat.value = `${prefix}${imgSrc_of_heat_Array[0]}`;
-      title_of_heat_Array = res.data.titles;
-      title_of_heat.value = title_of_heat_Array[0];
-    });
+  try {
+    const response = await axios.get('/enso/predictionResult/linechart', {
+      params: {
+        year: date.getFullYear(),
+        month: date.getMonth() + 1,
+      },
+    })
+    if (requestId !== requestIds[0]) return
+    if (
+      !response.data
+      || typeof response.data !== 'object'
+      || Object.keys(response.data).length === 0
+    ) {
+      throw new Error('Invalid ENSO index response')
+    }
+    chart1.value = response.data
+  } catch (error) {
+    if (requestId !== requestIds[0]) return
+    dataErrors.value[0] = requestErrorMessage(error, 'ENSO 指数预测加载失败')
+  } finally {
+    if (requestId === requestIds[0]) dataLoading.value[0] = false
+  }
 }
 
-// ====================== 热力图左右切换 ======================
-function change_time_heat(flag) {
-  const total = imgSrc_of_heat_Array.length; // 动态总数
+async function loadModeImages() {
+  const date = selectedDates.value[1]
+  if (!date) return
 
-  if (flag === "left") {
-    index_heat = index_heat > 0 ? index_heat - 1 : total - 1;
-  } else if (flag === "right") {
-    index_heat = index_heat < total - 1 ? index_heat + 1 : 0;
+  const requestId = ++requestIds[1]
+  dataLoading.value[1] = true
+  dataErrors.value[1] = ''
+  heatImages.value = []
+  heatTitles.value = []
+  heatIndex.value = 0
+
+  try {
+    const response = await axios.get('/imgs/predictionResult/ssta', {
+      params: {
+        year: date.getFullYear(),
+        month: date.getMonth() + 1,
+      },
+    })
+    if (requestId !== requestIds[1]) return
+
+    const images = Array.isArray(response.data?.data)
+      ? response.data.data.filter((item) => typeof item === 'string' && item)
+      : []
+    if (images.length === 0) {
+      throw new Error('Empty ENSO mode image list')
+    }
+
+    heatImages.value = images
+    heatTitles.value = Array.isArray(response.data?.titles)
+      ? response.data.titles
+      : []
+    preloadImages(images)
+  } catch (error) {
+    if (requestId !== requestIds[1]) return
+    dataErrors.value[1] = requestErrorMessage(error, 'ENSO 模态预测加载失败')
+  } finally {
+    if (requestId === requestIds[1]) dataLoading.value[1] = false
+  }
+}
+
+function loadActiveData() {
+  return chartSelected.value === 0 ? loadIndexChart() : loadModeImages()
+}
+
+async function selectChart(index) {
+  chartSelected.value = index
+  if (!activeRange.value?.start) {
+    await loadRange(index)
   }
 
-  imgSrc_of_heat.value = `${prefix}${imgSrc_of_heat_Array[index_heat]}`;
-  title_of_heat.value = `${title_of_heat_Array[index_heat]}`;
+  if (index === 0 && !hasIndexChart.value) {
+    await loadIndexChart()
+  } else if (index === 1 && heatImages.value.length === 0) {
+    await loadModeImages()
+  }
 }
 
+function handleDateChange() {
+  document.activeElement?.blur()
+  loadActiveData()
+}
 
+async function retryRange() {
+  await loadRange(chartSelected.value)
+  if (activeRange.value?.start) await loadActiveData()
+}
 
-// ====================== tab 样式控制 ======================
-const chartSelected = ref(0);
-const chartNames = ['指数预测', '模态预测'];
+function changeHeatIndex(direction) {
+  const total = heatImages.value.length
+  if (total < 2) return
 
-const moveBoxLeft = computed(() => chartSelected.value * 250);
+  heatIndex.value = direction === 'left'
+    ? (heatIndex.value - 1 + total) % total
+    : (heatIndex.value + 1) % total
+}
 
+const moveBoxLeft = computed(() => chartSelected.value * 250)
 const movBoxStyle = computed(() => ({
-  position: "absolute",
-  bottom: "0px",
   left: `${moveBoxLeft.value}px`,
-  height: "2px",
-  width: "125px",
-  transform: "translateX(50%)",
-  backgroundColor: "rgb(143,178,201)",
-  transition: "left 0.3s ease"
-}));
+}))
+
+onMounted(async () => {
+  await Promise.all([loadRange(0), loadRange(1)])
+  if (dateRanges.value[0].start) await loadIndexChart()
+})
 </script>
 
 <template>
-  <div class="pageContent">
+  <div class="page-content">
     <div class="banner">
-      <img :src="bannerImg" />
-      <h3 class="title">ENSO预测结果</h3>
+      <img :src="bannerImg" alt="">
+      <h3 class="page-title">ENSO预测结果</h3>
     </div>
-
 
     <div class="menu-container">
       <ul class="menu">
         <div :style="movBoxStyle" class="mov-box"></div>
-        <li v-for="(chartName, index) of chartNames" :key="chartName" @click="handleClick(chartName, index)"
-          :class="{ 'chart-name-selected': chartSelected === index }">
+        <li
+          v-for="(chartName, index) in chartNames"
+          :key="chartName"
+          :class="{ 'chart-name-selected': chartSelected === index }"
+          @click="selectChart(index)"
+        >
           <p>{{ chartName }}</p>
         </li>
       </ul>
     </div>
 
-
-    <div style="margin: 0px 10%;">
-      <div class="datePickerContainer">
-        <el-date-picker @change="update_charts()" v-model="currentDate" type="month" :clearable="false"
-          :disabledDate="limitedDateRange" />
+    <section class="content-shell">
+      <div class="date-picker-container">
+        <el-date-picker
+          v-model="currentDate"
+          type="month"
+          :clearable="false"
+          :disabled="rangeLoading[chartSelected] || !activeRange.start"
+          :disabled-date="limitedDateRange"
+          @change="handleDateChange"
+        />
       </div>
 
-      <div class="text-container" v-if="chartSelected === 0">
-        <p class="text_of_graph">{{ Chart1_Description.text }}</p>
+      <div v-if="rangeErrors[chartSelected]" class="state-panel">
+        <el-alert :title="rangeErrors[chartSelected]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="retryRange">重试日期加载</el-button>
       </div>
-      <div>
-        <p></p>
-      </div>
-    </div>
 
-    <div class="chart-selector" v-if="chartSelected === 0">
-      <v-chart class="chart_1" :option="chart1" autoresize> </v-chart>
-    </div>
-
-    <!-- 这里的chart-selector为全局样式，不用在本文件中添加 -->
-    <div class="chart-selector" v-else-if="chartSelected === 1">
-      <div class="pic_container">
-        <p class="picture_title">
-          {{ title_of_heat }}
-        </p>
-        <img style="max-height:90%;" :src="imgSrc_of_heat" alt="">
-        <el-button ref="buttonLeft" type="primary" class="arrow-left" :icon="ArrowLeft"
-          @click="change_time_heat('left')"></el-button>
-        <el-button ref="buttonRight" type="primary" class="arrow-right" :icon="ArrowRight"
-          @click="change_time_heat('right')"></el-button>
+      <div v-if="chartSelected === 0" class="description">
+        {{ chart1Description }}
       </div>
-    </div>
+    </section>
+
+    <section
+      v-if="chartSelected === 0"
+      class="chart-selector"
+      :class="{ 'has-state': Boolean(dataErrors[0]) }"
+      v-loading="dataLoading[0]"
+    >
+      <div v-if="dataErrors[0]" class="state-panel">
+        <el-alert :title="dataErrors[0]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="loadIndexChart">重新加载</el-button>
+      </div>
+      <v-chart v-else-if="hasIndexChart" class="chart" :option="chart1" autoresize />
+      <el-empty v-else-if="!dataLoading[0]" description="暂无指数预测数据" />
+    </section>
+
+    <section
+      v-else
+      class="chart-selector"
+      :class="{ 'has-state': Boolean(dataErrors[1]) }"
+      v-loading="dataLoading[1]"
+    >
+      <div v-if="dataErrors[1]" class="state-panel">
+        <el-alert :title="dataErrors[1]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="loadModeImages">重新加载</el-button>
+      </div>
+      <div v-else-if="heatImages.length" class="picture-container">
+        <p class="picture-title">{{ currentHeatTitle }}</p>
+        <p class="picture-count">{{ heatIndex + 1 }}/{{ heatImages.length }}</p>
+        <img :src="currentHeatImage" alt="ENSO 模态预测图">
+        <template v-if="heatImages.length > 1">
+          <el-button
+            type="primary"
+            class="arrow-left"
+            :icon="ArrowLeft"
+            aria-label="上一张"
+            @click="changeHeatIndex('left')"
+          />
+          <el-button
+            type="primary"
+            class="arrow-right"
+            :icon="ArrowRight"
+            aria-label="下一张"
+            @click="changeHeatIndex('right')"
+          />
+        </template>
+      </div>
+      <el-empty v-else-if="!dataLoading[1]" description="暂无模态预测图片" />
+    </section>
   </div>
 </template>
 
 <style scoped lang="scss">
-.title {
-  font-family: 'STXinwei';
-  font-weight: 300; //调整字体粗细
-  text-align: center;
-  font-size: 55px;
-  margin-left: 20%;
-
-  letter-spacing: 1px;
-  /* 字符间距 */
-
-  z-index: 1;
-  /* 确保图片在文字下方 */
-  //color:#ffffff;
-  color: rgb(251, 236, 222);
-
-
+.page-content {
+  min-height: 100%;
 }
 
-.datePickerContainer {
-  display: flex;
-  justify-content: flex-end;
-  position: relative;
-  padding: 50px 0 30px;
-}
-
-.text {
-  margin-left: 5px;
-  margin-right: 10px;
-}
-
-/*chart1、2 的表和文字*/
-.chart {
-  height: 400px;
-}
-
-.text_of_graph {
-  text-align: center;
-  font-size: 17px;
-}
-
-/* 预报误差页面的容器 没用了*/
-// .chart-container {
-//   size: 100%
-// }
-
-
-
-/* 新版添加的代码 =====================================================*/
 .banner {
   position: relative;
   height: 420px;
   display: flex;
-  flex-direction: row;
   align-items: center;
 }
 
 .banner img {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: 50% -190px;
-  /* 水平居中，垂直向下偏移20px */
-  /* 确保图片在文字下方 */
-  z-index: 0;
+}
+
+.page-title {
+  position: relative;
+  z-index: 1;
+  margin-left: 20%;
+  color: rgb(251, 236, 222);
+  font-family: 'STXinwei';
+  font-size: 55px;
+  font-weight: 300;
 }
 
 .menu-container {
+  position: relative;
+  z-index: 2;
   display: flex;
-  //height: 105px;
-  height: 85px;
-  flex-direction: row;
   justify-content: center;
-  align-items: center;
+  height: 85px;
   margin-top: -50px;
 }
 
-ul.menu {
+.menu {
   position: relative;
-  list-style-type: none;
-  height: 100%;
   display: flex;
-  padding: 0px;
-  flex-direction: row;
-  justify-content: center;
-  background-color: white;
-  border-radius: 10px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.4);
-
+  margin: 0;
+  padding: 0;
   overflow: hidden;
-  /* 新增: 确保伪元素不会超出 ul.menu 边界 */
+  list-style: none;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
 }
 
-/* 新增: 添加一个伪元素用于整个选项卡区域的上半部分透明或阴影效果 */
-ul.menu::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 55%;
-  /* 仅覆盖上半部分 */
-  background-color: rgba(240, 240, 240, 0.8);
-  /* 上半部分透明效果，或更改为 box-shadow 实现阴影效果 */
-  z-index: 0;
-  /* 确保伪元素在 li 元素下方 */
-  pointer-events: none;
-  /* 确保透明层不影响鼠标事件 */
-
-}
-
-ul.menu li {
-  position: relative;
+.menu li {
   display: flex;
   width: 250px;
-  height: 100%;
-  flex-direction: column;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   cursor: pointer;
-  /* 更改鼠标形状为手形 */
-  overflow: hidden;
-  /* 确保伪元素的边界与 li 元素一致 */
   font-size: 17px;
 }
 
-ul.menu li:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 50%;
-  width: 2px;
-  height: 50%;
-  background-color: #00000020;
-  transform: translateY(-50%);
-}
-
-// ul.menu li:hover::before {
-//   content: "";
-//   position: absolute;
-//   top: 0;
-//   left: 0;
-//   width: 100%;
-//   height: 100%;
-//   //background-color: rgba(240, 240, 240, 0.8); /* 浅灰色 */
-//   border-radius: 10px; /* 确保形状与选项卡一致 */
-//   pointer-events: none; /* 确保伪元素不影响鼠标事件 */
-//   z-index: 1; /* 确保覆盖层在文字和内容下方 */
-// }
-
-ul.menu li:hover p {
-  color: rgb(71, 72, 76);
-  z-index: 2;
-  /* 确保文字在覆盖层之上 */
-}
-
-/* 已经被选中的选项卡在鼠标悬停时字体颜色不变 */
-ul.menu li.chart-name-selected:hover p {
-  color: inherit; //保持原有颜色
+.chart-name-selected {
+  color: rgb(30, 158, 179);
 }
 
 .mov-box {
   position: absolute;
-  z-index: 3;
-  /* 确保滑动条在覆盖层之上 */
+  bottom: 0;
+  width: 125px;
+  height: 2px;
+  transform: translateX(50%);
+  background: rgb(143, 178, 201);
+  transition: left 0.3s ease;
 }
 
-// .chart-selector {
-//   position: relative;
-//   //修改为块级
-//   display: block;
-//   flex-direction: column;
-//   justify-content: center;
-//   align-items: center;
-//   padding: 0px 15%;
-// }
-
-.chart-name-selected {
-  color: rgb(30, 158, 179)
+.content-shell,
+.chart-selector {
+  margin: 0 10%;
 }
 
-
-//图表样式
-.chart_1 {
-  height: 50vh;
-  min-height: 400px;
-  background-color: white;
-  /* 圆角 */
-  border-radius: 8px;
-  /* 阴影 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  padding-top: 20px;
-  padding-bottom: 20px;
-}
-
-.pic_container {
+.date-picker-container {
   display: flex;
+  justify-content: flex-end;
+  padding: 50px 0 30px;
+}
+
+.description {
+  padding: 16px;
+  text-align: center;
+  font-size: 17px;
+  background: rgba(239, 242, 252, 0.8);
+  border-radius: 8px;
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.chart-selector {
+  min-height: 430px;
+  margin-top: 28px;
+  margin-bottom: 40px;
+}
+
+.chart-selector.has-state {
+  min-height: 260px;
+}
+
+.chart {
+  height: 50vh;
+  min-height: 430px;
+  padding: 20px 0;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.picture-container {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 500px;
+  box-sizing: border-box;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  width: 100%;
-  height: 60vh;
+  padding: 20px clamp(88px, 12%, 160px);
   overflow: hidden;
-  background-color: white;
-  /* 圆角 */
+  background: white;
   border-radius: 8px;
-  /* 阴影 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  padding-top: 20px;
-  padding-bottom: 20px;
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
 }
 
-.picture_title {
-  text-align: center;
+.picture-container img {
+  max-width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.picture-title {
+  margin: 0 0 6px;
   font-size: 18px;
 }
 
-.text-container {
-  position: relative;
-  margin: 0px auto;
-  text-align: center;
-  background-color: rgba(239, 242, 252, 0.801);
-  /* 淡紫色 */
-  //display: flex;
-  padding: 4px;
-  border-radius: 8px;
-  /* 可选的圆角 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  /* 阴影 */
-  //font-family: 'sans-serif';
+.picture-count {
+  margin: 0 0 12px;
+  color: #606266;
+}
 
+.arrow-left,
+.arrow-right {
+  position: absolute;
+  top: 0;
+}
+
+.arrow-left {
+  left: 0;
+}
+
+.arrow-right {
+  right: 0;
+}
+
+.state-panel {
+  display: flex;
+  width: min(560px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 28px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  background: rgba(250, 250, 250, 0.82);
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+}
+
+.state-panel :deep(.el-button) {
+  position: static;
+  width: auto;
+  min-width: 112px;
+  height: 38px;
+  align-self: center;
+  padding: 8px 20px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .menu li {
+    width: 45vw;
+  }
+
+  .page-title {
+    margin-left: 8%;
+    font-size: 42px;
+  }
+
+  .content-shell,
+  .chart-selector {
+    margin-right: 4%;
+    margin-left: 4%;
+  }
+
+  .picture-container {
+    padding-right: 56px;
+    padding-left: 56px;
+  }
 }
 </style>

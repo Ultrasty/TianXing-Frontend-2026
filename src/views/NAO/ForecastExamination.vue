@@ -1,5 +1,4 @@
 <script setup>
-// ===== 原有导入 =====
 import { ref, onMounted, reactive, watch, defineExpose, computed } from "vue";
 import * as echarts from "echarts";
 import axios from "axios";
@@ -13,12 +12,7 @@ const prefix = "https://tianxing.tongji.edu.cn"
 
 // 新加入
 const chartSelected = ref(0);
-// 添加 '评估指标'
 const chartNames = ['指数预测', '模态预测', '评估指标'];
-
-// 评估数据图表相关变量
-const optionEvaluation = ref({});          // ECharts 配置对象
-const evaluationDescription = ref('NAO预测评估指标（相关系数/均方根误差等）趋势');
 
 //时间选择器范围框定--start
 const start_year = ref(null);
@@ -61,11 +55,14 @@ const title_of_nao = ref({})
 
 const option7 = ref({})
 
-// 加载评估数据的函数
-const loadEvaluationData = () => {
-  // 等待后端API
+// 评估指标相关
+const optionEvaluation = ref({});
+const evaluationDescription = ref('NAO预测评估指标（相关系数/均方根误差等）趋势');
 
-  // 目前使用模拟数据（可替换）
+function loadEvaluationData() {
+  // 待后端接口就绪
+
+  // 模拟数据
   const mockYears = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024'];
   const mockValues = [0.72, 0.68, 0.74, 0.80, 0.77, 0.82, 0.79, 0.85, 0.88, 0.83];
   const option = {
@@ -84,7 +81,7 @@ const loadEvaluationData = () => {
     ]
   };
   optionEvaluation.value = option;
-};
+}
 
 function updateChartTitle() {
   //使元素失焦
@@ -113,7 +110,6 @@ function updateChartTitle() {
       console.error(error);
     });
 
-  // 重新加载评估数据
   if (chartSelected.value === 2) {
     loadEvaluationData();
   }
@@ -138,7 +134,6 @@ axios.get('/nao/predictionExamination/naoi')
   });
 
 function change_time_nao(flag) {
-
   if (flag === "left") {
     if (index_nao > 0) {
       index_nao--;
@@ -160,10 +155,8 @@ function change_time_nao(flag) {
   //text_of_temperature.value=text_of_temperature_Array[index_tempe];
 }
 
-//换成新的选项卡
 function selectChart(index) {
   chartSelected.value = index;
-  // 切换到评估tab时加载数据
   if (index === 2) {
     loadEvaluationData();
   }
@@ -186,33 +179,124 @@ const movBoxStyle = computed(() => ({
   transition: "left 0.3s ease"
 }));
 
+// 状态管理（图片加载、错误处理）
+const loading = ref({ 0: false, 1: false, 2: false });
+const errors = ref({ 0: null, 1: null, 2: null });
+
+const modalImages = ref([]);
+const modalImageIndex = ref(0);
+const currentModalImage = computed(() => {
+  return modalImages.value[modalImageIndex.value] || '';
+});
+const modalTitle = ref('');
+
+const changeImageIndex = (direction) => {
+  const len = modalImages.value.length;
+  if (len < 2) return;
+  if (direction === 'left') {
+    modalImageIndex.value = (modalImageIndex.value - 1 + len) % len;
+  } else {
+    modalImageIndex.value = (modalImageIndex.value + 1) % len;
+  }
+};
+
+const retryActive = () => {
+  if (chartSelected.value === 0) {
+    axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
+      .then(res => {
+        modalImages.value = res.data.map(src => `${prefix}${src}`);
+        modalImageIndex.value = 0;
+        errors.value[0] = null;
+        loading.value[0] = false;
+      })
+      .catch(err => {
+        errors.value[0] = '加载图片失败，请稍后重试';
+        loading.value[0] = false;
+      });
+  } else if (chartSelected.value === 1) {
+    axios.get('/nao/predictionExamination/naoi')
+      .then(res => {
+        option7.value = res.data;
+        errors.value[1] = null;
+        loading.value[1] = false;
+      })
+      .catch(err => {
+        errors.value[1] = '加载模态预测数据失败，请稍后重试';
+        loading.value[1] = false;
+      });
+  } else if (chartSelected.value === 2) {
+    loadEvaluationData();
+    errors.value[2] = null;
+    loading.value[2] = false;
+  }
+};
+
+// 初始化数据
+const initImageData = () => {
+  loading.value[0] = true;
+  axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
+    .then(res => {
+      imgSrc_of_nao_Array = res.data;
+      modalImages.value = res.data.map(src => `${prefix}${src}`);
+      modalImageIndex.value = 0;
+      errors.value[0] = null;
+      loading.value[0] = false;
+    })
+    .catch(err => {
+      errors.value[0] = '加载图片失败，请稍后重试';
+      loading.value[0] = false;
+    });
+};
+
+const initModalData = () => {
+  loading.value[1] = true;
+  axios.get('/nao/predictionExamination/naoi')
+    .then(res => {
+      option7.value = res.data;
+      errors.value[1] = null;
+      loading.value[1] = false;
+    })
+    .catch(err => {
+      errors.value[1] = '加载模态预测数据失败，请稍后重试';
+      loading.value[1] = false;
+    });
+};
+
 onMounted(() => {
+  initImageData();
+  initModalData();
   loadEvaluationData();
 });
 </script>
 
 <template>
-  <div class="pageContent">
+  <div class="page-content">
     <div class="banner">
-      <img :src="bannerImg" />
-      <h3 class="title">NAO预测结果检验</h3>
+      <img :src="bannerImg" alt="">
+      <h3 class="page-title">NAO预测结果检验</h3>
     </div>
 
     <div class="menu-container">
       <ul class="menu">
         <div :style="movBoxStyle" class="mov-box"></div>
-        <li v-for="(chartName, index) of chartNames" :key="chartName" @click="selectChart(index)"
-          :class="{ 'chart-name-selected': chartSelected === index }">
+        <li
+          v-for="(chartName, index) in chartNames"
+          :key="chartName"
+          :class="{ 'chart-name-selected': chartSelected === index }"
+          @click="selectChart(index)"
+        >
           <p>{{ chartName }}</p>
         </li>
       </ul>
     </div>
 
     <div style="margin: 0px 10%;">
-
-      <div class="datePickerContainer">
+      <div class="datePickerContainer" v-if="chartSelected !== 1">
         <el-date-picker @change="updateChartTitle()" v-model="selectedDateTime" type="month" :clearable="false"
           :disabledDate="limitedDateRange" />
+      </div>
+      <div v-else class="date-independent-note">
+        该指标为固定的提前期相关系数，不随起报日期变化。
       </div>
 
       <div class="text-container" v-if="chartSelected === 0">
@@ -220,14 +304,11 @@ onMounted(() => {
           {{ text_of_option1 }}
         </div>
       </div>
-
       <div class="text-container" v-if="chartSelected === 1">
         <div class="description1">
           {{ text_of_option7 }}
         </div>
       </div>
-
-      <!-- 评估指标描述 -->
       <div class="text-container" v-if="chartSelected === 2">
         <div class="description1">
           {{ evaluationDescription }}
@@ -238,298 +319,265 @@ onMounted(() => {
       </div>
     </div>
 
-    <div>
-      <p></p>
-    </div>
-
-    <div class="chart-selector" v-if="chartSelected === 1">
-      <h2 class="chart-title">
-        NAOI指数预测的相关系数
-      </h2>
-      <div class="chart">
-        <v-chart :option="option7" autoresize></v-chart>
+    <section
+      class="chart-selector"
+      :class="{ 'has-state': Boolean(errors[chartSelected]) }"
+      v-loading="loading[chartSelected]"
+    >
+      <div v-if="errors[chartSelected]" class="state-panel">
+        <el-alert :title="errors[chartSelected]" type="error" :closable="false" show-icon />
+        <el-button type="primary" plain @click="retryActive">重新加载</el-button>
       </div>
-    </div>
 
-    <div class="chart-selector" v-else-if="chartSelected === 0">
-      <!-- <div class="whole_container"> -->
-      <div class="pic_container">
-        <h2 class="chart-title">
-          {{ selectedYear }}年{{ selectedMonth }}月 预测结果分布误差图
-        </h2>
-        <img class="picture" :src="imgSrc_of_nao" alt="">
+      <div v-else-if="chartSelected === 0 && modalImages.length" class="picture-container">
+        <h2>{{ modalTitle || `${selectedYear}年${selectedMonth}月 预测结果分布误差图` }}</h2>
+        <p>{{ modalImageIndex + 1 }}/{{ modalImages.length }}</p>
+        <img :src="currentModalImage" alt="NAO 预测结果分布误差图">
+        <template v-if="modalImages.length > 1">
+          <el-button
+            type="primary"
+            class="arrow-left"
+            :icon="ArrowLeft"
+            aria-label="上一张"
+            @click="changeImageIndex('left')"
+          />
+          <el-button
+            type="primary"
+            class="arrow-right"
+            :icon="ArrowRight"
+            aria-label="下一张"
+            @click="changeImageIndex('right')"
+          />
+        </template>
       </div>
-      <!-- <el-button ref="buttonLeft" type="primary" class="arrowLeft" :icon="ArrowLeft"
-            @click=" change_time_nao('left')"></el-button>
-          <el-button ref="buttonRight" type="primary" class="arrowRight" :icon="ArrowRight"
-            @click=" change_time_nao('right')"></el-button> -->
-      <!-- </div> -->
-    </div>
 
-    <!-- 评估指标图表 -->
-    <div class="chart-selector" v-else-if="chartSelected === 2">
-      <div class="chart">
-        <v-chart :option="optionEvaluation" autoresize></v-chart>
+      <div v-else-if="chartSelected === 1">
+        <h2 class="chart-title">NAOI指数预测的相关系数</h2>
+        <div class="chart">
+          <v-chart :option="option7" autoresize></v-chart>
+        </div>
       </div>
-    </div>
 
+      <div v-else-if="chartSelected === 2">
+        <h2 class="chart-title">NAO评估指标趋势</h2>
+        <div class="chart">
+          <v-chart :option="optionEvaluation" autoresize></v-chart>
+        </div>
+      </div>
+    </section>
   </div>
 </template>
 
 <style scoped lang="scss">
-.chart-title {
-  text-align: center;
-  margin-top: 0px;
-  font-size: 18px;
+.page-content {
+  min-height: 100%;
 }
 
-.title {
-  //font-family: 'FangSong', sans-serif;
-  //font-family: 'STKaiti';
-  //font-family: 'SimSun';
-  font-family: 'STXinwei';
-  font-weight: 300; //调整字体粗细
-  text-align: center;
-  font-size: 55px;
-  margin-left: 20%;
-  letter-spacing: 1px; /* 字符间距 */
-  z-index: 1; /* 确保图片在文字下方 */
-  color:rgb(19, 24, 36);
-
-}
-
-.chart {
-  height: 500px;
-  background-color: white;
-}
-
-.datePickerContainer {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 20px;
-  padding-right: 15%;
-  padding-top: 50px;
-}
-
-.text {
-  margin-left: 5px;
-  margin-right: 10px;
-}
-
-.picture_title {
-  text-align: center;
-  font-size: 14px;
-}
-
-.chart {
-  width: 100%;
-  background-color: white;
-  /* 圆角 */
-  border-radius: 8px;
-  /* 阴影 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  padding-top: 20px;
-  padding-bottom: 20px;
-}
-
-.description {
-  text-align: center;
-  font-size: 17px;
-  margin-left: 10px;
-}
-
-.description1 {
-  text-align: center;
-  font-size: 17px;
-  margin-left: 10px;
-}
-
-.datePickerContainer {
-  display: flex;
-  justify-content: flex-end;
-  position: relative;
-  padding: 50px 0 30px;
-}
-
-.text {
-  margin-left: 5px;
-  margin-right: 10px;
-}
-
-.picture_title {
-  text-align: center;
-  font-size: 14px;
-}
-
-.picture {
-  min-width: 100%;
-  display: block;
-  /* 将元素设置为块级元素 */
-  /* 确保图片不会超出父容器 */
-  // height: auto;
-  /* 保持图片比例 */
-  /* 使图片可以与 text-align 一起使用 */
-}
-
-.whole_container {
-  // position: relative;
-  display: block;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  margin: 0 0;
-  padding: 0 0;
-}
-
-.pic_container {
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 20px 0;
-  width: 100%;
-  background-color: white;
-  border-radius: 8px;
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-}
-
-//以下新加代码
 .banner {
   position: relative;
   height: 420px;
   display: flex;
-  flex-direction: row;
   align-items: center;
 }
 
 .banner img {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: 50% -155px;
-  /* 水平居中，垂直向下偏移20px */
-  /* 确保图片在文字下方 */
-  z-index: 0;
+}
+
+.page-title {
+  position: relative;
+  z-index: 1;
+  margin-left: 20%;
+  color: rgb(19, 24, 36);
+  font-family: 'STXinwei';
+  font-size: 55px;
+  font-weight: 300;
 }
 
 .menu-container {
+  position: relative;
+  z-index: 2;
   display: flex;
-  //height: 105px;
-  height: 85px;
-  flex-direction: row;
   justify-content: center;
-  align-items: center;
+  height: 85px;
   margin-top: -50px;
 }
 
-ul.menu {
+.menu {
   position: relative;
-  list-style-type: none;
-  height: 100%;
   display: flex;
-  padding: 0px;
-  flex-direction: row;
-  justify-content: center;
-  background-color: white;
-  border-radius: 10px;
-  box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.4);
+  margin: 0;
+  padding: 0;
   overflow: hidden;
-  /* 新增: 确保伪元素不会超出 ul.menu 边界 */
+  list-style: none;
+  background: white;
+  border-radius: 10px;
+  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
 }
 
-/* 新增: 添加一个伪元素用于整个选项卡区域的上半部分透明或阴影效果 */
-ul.menu::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 55%;
-  /* 仅覆盖上半部分 */
-  background-color: rgba(240, 240, 240, 0.8);
-  /* 上半部分透明效果，或更改为 box-shadow 实现阴影效果 */
-  z-index: 0;
-  /* 确保伪元素在 li 元素下方 */
-  pointer-events: none;
-  /* 确保透明层不影响鼠标事件 */
-}
-
-ul.menu li {
-  position: relative;
+.menu li {
   display: flex;
   width: 250px;
-  height: 100%;
-  flex-direction: column;
-  justify-content: center;
   align-items: center;
+  justify-content: center;
   cursor: pointer;
-  /* 更改鼠标形状为手形 */
-  overflow: hidden;
-  /* 确保伪元素的边界与 li 元素一致 */
   font-size: 17px;
 }
 
-ul.menu li:not(:last-child)::after {
-  content: "";
-  position: absolute;
-  right: 0;
-  top: 50%;
-  width: 2px;
-  height: 50%;
-  background-color: #00000020;
-  transform: translateY(-50%);
-}
-
-// ul.menu li:hover::before {
-//   content: "";
-//   position: absolute;
-//   top: 0;
-//   left: 0;
-//   width: 100%;
-//   height: 100%;
-//   //background-color: rgba(240, 240, 240, 0.8); /* 浅灰色 */
-//   border-radius: 10px; /* 确保形状与选项卡一致 */
-//   pointer-events: none; /* 确保伪元素不影响鼠标事件 */
-//   z-index: 1; /* 确保覆盖层在文字和内容下方 */
-// }
-
-ul.menu li:hover p {
-  color: rgb(71, 72, 76);
-  z-index: 2;
-  /* 确保文字在覆盖层之上 */
-}
-
-/* 已经被选中的选项卡在鼠标悬停时字体颜色不变 */
-ul.menu li.chart-name-selected:hover p {
-  color: inherit; //保持原有颜色
+.chart-name-selected {
+  color: rgb(30, 158, 179);
 }
 
 .mov-box {
   position: absolute;
-  z-index: 3;
-  /* 确保滑动条在覆盖层之上 */
+  bottom: 0;
+  width: 125px;
+  height: 2px;
+  transform: translateX(50%);
+  background: rgb(143, 178, 201);
+  transition: left 0.3s ease;
 }
 
-.chart-name-selected {
-  color: rgb(30, 158, 179)
+.content-shell,
+.chart-selector {
+  margin-right: 10%;
+  margin-left: 10%;
 }
 
-.text-container {
-  position: relative;
-  margin: 0px auto;
+.datePickerContainer,
+.date-independent-note {
+  display: flex;
+  justify-content: flex-end;
+  padding: 50px 0 30px;
+}
+
+.date-independent-note {
+  color: #606266;
+}
+
+.description {
+  padding: 18px;
   text-align: center;
-  background-color: rgba(239, 242, 252, 0.801);
-  ;
-  /* 淡紫色 */
-  //display: flex;
-  padding: 20px;
+  font-size: 17px;
+  background: rgba(239, 242, 252, 0.8);
   border-radius: 8px;
-  /* 可选的圆角 */
-  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
-  /* 阴影 */
-  //font-family: 'STKaiti';
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.chart-selector {
+  position: relative;
+  min-height: 500px;
+  margin-top: 28px;
+  margin-bottom: 40px;
+  overflow: hidden;
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+}
+
+.chart-selector.has-state {
+  min-height: 260px;
+}
+
+.chart-title {
+  margin: 20px 0 0;
+  text-align: center;
+  font-size: 18px;
+}
+
+.chart {
+  height: 500px;
+}
+
+.picture-container {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-height: 500px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px clamp(88px, 12%, 160px);
+}
+
+.picture-container h2,
+.picture-container p {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.picture-container img {
+  width: clamp(480px, 58%, 700px);
+  max-width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.arrow-left,
+.arrow-right {
+  position: absolute;
+  top: 0;
+}
+
+.arrow-left {
+  left: 0;
+}
+
+.arrow-right {
+  right: 0;
+}
+
+.state-panel {
+  display: flex;
+  width: min(560px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 28px;
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 16px;
+  background: rgba(250, 250, 250, 0.82);
+  border: 1px solid #ebeef5;
+  border-radius: 10px;
+}
+
+.state-panel :deep(.el-button) {
+  position: static;
+  width: auto;
+  min-width: 112px;
+  height: 38px;
+  align-self: center;
+  padding: 8px 20px;
+  font-size: 14px;
+  border-radius: 6px;
+}
+
+@media (max-width: 760px) {
+  .menu li {
+    width: 45vw;
+  }
+
+  .page-title {
+    margin-left: 8%;
+    font-size: 40px;
+  }
+
+  .content-shell,
+  .chart-selector {
+    margin-right: 4%;
+    margin-left: 4%;
+  }
+
+  .picture-container {
+    padding-right: 56px;
+    padding-left: 56px;
+  }
 }
 </style>
