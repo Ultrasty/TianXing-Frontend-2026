@@ -94,12 +94,6 @@ const router = createRouter({
                     meta: { title: 'NAO_ForecastExamination' },
                     path: 'NAO_ForecastExamination',
                     component: NAOForecastExamination,
-                },
-                {
-                    name: 'ExaminationManage',
-                    path: '/admin/evaluations',
-                    meta: { title: '预报评估数据管理', requiresAdmin: true },
-                    component: () => import('@/views/admin/ExaminationManage.vue'),
                 }
             ],
         },
