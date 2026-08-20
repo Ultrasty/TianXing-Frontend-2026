@@ -1,272 +1,192 @@
 <script setup>
-import { ref, onMounted, reactive, watch, defineExpose, computed } from "vue";
-import * as echarts from "echarts";
-import axios from "axios";
-import VChart from 'vue-echarts';
-import { nextTick } from "vue";
-import { configProviderContextKey } from "element-plus";
-import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
-import bannerImg from '@/assets/nao.jpg';//首页图
+import { computed, onMounted, ref } from 'vue'
+import axios from 'axios'
+import VChart from 'vue-echarts'
+import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
+import bannerImg from '@/assets/nao.jpg'
+import { preloadImages, resolveImageUrl } from '@/utils/image'
+import { requestErrorMessage } from '@/utils/requestError'
 
-const prefix = "https://tianxing.tongji.edu.cn"
+const chartNames = ['模态预测', '指数预测']
+const chartSelected = ref(0)
+const descriptions = [
+  '预测误差主要来自于对中纬度和冰岛附近低压的高估。模型能够预测出 NAO 的典型两极模态，模拟误差会随预测时长增加。',
+  'NAOI 的中长期预测技巧优于失去预测能力后的数值模式，将 NAO 的有效预测时间扩展到了约六个月。',
+]
 
-// 新加入
-const chartSelected = ref(0);
-const chartNames = ['指数预测', '模态预测', '评估指标'];
+const selectedDate = ref(null)
+const availableMonths = ref([])
+const modalImages = ref([])
+const modalImageIndex = ref(0)
+const correlationOption = ref({})
+const loading = ref([false, false])
+const errors = ref(['', ''])
+const requestIds = [0, 0]
 
-//时间选择器范围框定--start
-const start_year = ref(null);
-const start_month = ref(null);
-const end_year = ref(null);
-const end_month = ref(null);
-
-const selectedDateTime = ref(new Date('2015-1'));
-const selectedYear = computed(() => {
-  return selectedDateTime.value.getFullYear();
+const currentModalImage = computed(() => (
+  resolveImageUrl(modalImages.value[modalImageIndex.value])
+))
+const availableMonthKeys = computed(() => new Set(availableMonths.value.map(monthKey)))
+const hasCorrelationData = computed(() => (
+  Object.keys(correlationOption.value || {}).length > 0
+))
+const modalTitle = computed(() => {
+  if (!selectedDate.value) return 'NAO 预测结果分布误差图'
+  return `${selectedDate.value.getFullYear()}年${selectedDate.value.getMonth() + 1}月 预测结果分布误差图`
 })
-const selectedMonth = computed(() => {
-  return selectedDateTime.value.getMonth() + 1;
-})
 
-axios.get('/nao/initialize/naoCORR')
-  .then(res => {
-    start_year.value = res.data.start_year;
-    start_month.value = new Date(res.data.start_month);
-    end_year.value = res.data.end_year;
-    end_month.value = new Date(res.data.end_month);
-    //console.log(res.data);
-  })
-  .catch(error => {
-    console.error(error);
-  });
-
-const limitedDateRange = (time) => {
-  return time.getFullYear() < start_year.value || time.getFullYear() > end_year.value;
-};
-
-const text_of_option1 = ref('预测误差主要来自于对中纬度和冰岛附近低压的高估，能够预测出NAO的典型两级模态 ，模拟误差随着预测时长逐渐增加。')//表示前六个图底下的文字描述
-const text_of_option7 = ref('对于为期1个月的NAOI预测，不如高分辨率模式ECMWF ，但与低分辨率模式ECCC相当。由于只接受月平均数作为输入，忽略了决定短时尺度可预测性的天气现象和初始条件。在超过两个月的提前期的预测技巧远远超过了失去预测能力的数值模式，将NAO的有效预测时间从1个月扩展到了6个月。')
-
-var index_nao = 0; //切换气温预测时修改这个索引
-var imgSrc_of_nao_Array;
-var title_of_nao_Array;
-const imgSrc_of_nao = ref({})
-const title_of_nao = ref({})
-
-const option7 = ref({})
-
-// 评估指标相关
-const optionEvaluation = ref({});
-const evaluationDescription = ref('NAO预测评估指标（相关系数/均方根误差等）趋势');
-
-function loadEvaluationData() {
-  // 待后端接口就绪
-
-  // 模拟数据
-  const mockYears = ['2015', '2016', '2017', '2018', '2019', '2020', '2021', '2022', '2023', '2024'];
-  const mockValues = [0.72, 0.68, 0.74, 0.80, 0.77, 0.82, 0.79, 0.85, 0.88, 0.83];
-  const option = {
-    title: { text: 'NAO预测相关系数（逐年起报）', left: 'center' },
-    tooltip: { trigger: 'axis' },
-    xAxis: { type: 'category', data: mockYears, name: '起报年份' },
-    yAxis: { type: 'value', min: 0, max: 1, name: '相关系数' },
-    series: [
-      {
-        type: 'line',
-        data: mockValues,
-        smooth: true,
-        lineStyle: { width: 3 },
-        areaStyle: { opacity: 0.1 }
-      }
-    ]
-  };
-  optionEvaluation.value = option;
+function createMonth(yearValue, monthValue) {
+  const year = Number(yearValue)
+  const month = Number(monthValue)
+  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
+    return null
+  }
+  return new Date(year, month - 1, 1)
 }
 
-function updateChartTitle() {
-  //使元素失焦
-  document.activeElement.blur();
+function monthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+}
 
-  axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
-    .then(res => {
-      index_nao = 0;
-      console.log("点击标签,更新nao", res.data);
-      imgSrc_of_nao_Array = res.data;
-      imgSrc_of_nao.value = `${prefix}${imgSrc_of_nao_Array[0]}`;
-      //console.log("wwwww",imgSrc_of_nao_Array[0]);
-    })
-    .catch(error => {
-      console.error(error);
-    });
+function normalizeAvailableMonths(data) {
+  const candidates = Array.isArray(data?.availableMonths)
+    ? data.availableMonths.map((item) => createMonth(item?.year, item?.month))
+    : [createMonth(data?.end_year, data?.end_month)]
+  const unique = new Map()
 
-  axios.get('/nao/predictionExamination/naoi')
-    .then(res => {
-      console.log("更新naoi", res.data);
-      // title_of_option1.value='提前1个月预测';
-      // list = res.data.imgSrc;
-      option7.value = res.data;
-    })
-    .catch(error => {
-      console.error(error);
-    });
+  candidates.filter(Boolean).forEach((date) => unique.set(monthKey(date), date))
+  return [...unique.values()].sort((left, right) => left.getTime() - right.getTime())
+}
 
-  if (chartSelected.value === 2) {
-    loadEvaluationData();
+function limitedDateRange(time) {
+  return !availableMonthKeys.value.has(monthKey(time))
+}
+
+function normalizeImages(value) {
+  const list = Array.isArray(value) ? value : [value]
+  return list.filter((item) => typeof item === 'string' && item.trim())
+}
+
+async function initializeModal() {
+  const requestId = ++requestIds[0]
+  loading.value[0] = true
+  errors.value[0] = ''
+  modalImages.value = []
+  modalImageIndex.value = 0
+
+  try {
+    const response = await axios.get('/nao/initialize/naoCORR')
+    if (requestId !== requestIds[0]) return
+
+    const normalizedMonths = normalizeAvailableMonths(response.data)
+    if (normalizedMonths.length === 0) throw new Error('Empty NAO examination month list')
+    const images = normalizeImages(response.data?.data)
+    if (images.length === 0) throw new Error('Empty NAO examination image list')
+
+    availableMonths.value = normalizedMonths
+    selectedDate.value = new Date(normalizedMonths[normalizedMonths.length - 1])
+    modalImages.value = images
+    preloadImages(images)
+  } catch (error) {
+    if (requestId !== requestIds[0]) return
+    availableMonths.value = []
+    selectedDate.value = null
+    errors.value[0] = requestErrorMessage(error, 'NAO 模态检验初始化失败')
+  } finally {
+    if (requestId === requestIds[0]) loading.value[0] = false
   }
 }
 
-//////////以下两个是初始化
-axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
-  .then(res => {
-    index_nao = 0;
-    console.log("初始化nao", res.data);
-    imgSrc_of_nao_Array = res.data;
-    imgSrc_of_nao.value = `${prefix}${imgSrc_of_nao_Array[0]}`;
-    //console.log("swwwww",imgSrc_of_nao_Array[0]);
-  });
+async function loadModal() {
+  if (!selectedDate.value) return
 
-axios.get('/nao/predictionExamination/naoi')
-  .then(res => {
-    console.log("初始化naoi", res.data);
-    // title_of_option1.value='提前1个月预测';
-    // list = res.data.imgSrc;
-    option7.value = res.data;
-  });
+  const requestId = ++requestIds[0]
+  loading.value[0] = true
+  errors.value[0] = ''
+  modalImages.value = []
+  modalImageIndex.value = 0
 
-function change_time_nao(flag) {
-  if (flag === "left") {
-    if (index_nao > 0) {
-      index_nao--;
-    }
-    else {
-      index_nao = 5;
-    }
+  try {
+    const response = await axios.get('/nao/predictionExamination/nao', {
+      params: {
+        year: selectedDate.value.getFullYear(),
+        month: selectedDate.value.getMonth() + 1,
+      },
+    })
+    if (requestId !== requestIds[0]) return
+    const images = normalizeImages(response.data)
+    if (images.length === 0) throw new Error('Empty NAO examination image list')
+    modalImages.value = images
+    preloadImages(images)
+  } catch (error) {
+    if (requestId !== requestIds[0]) return
+    errors.value[0] = requestErrorMessage(error, 'NAO 模态检验图片加载失败')
+  } finally {
+    if (requestId === requestIds[0]) loading.value[0] = false
   }
-  else if (flag === "right") {
-    if (index_nao < 5) {
-      index_nao++;
+}
+
+async function loadCorrelation() {
+  const requestId = ++requestIds[1]
+  loading.value[1] = true
+  errors.value[1] = ''
+  correlationOption.value = {}
+
+  try {
+    const response = await axios.get('/nao/predictionExamination/naoi')
+    if (requestId !== requestIds[1]) return
+    if (
+      !response.data
+      || typeof response.data !== 'object'
+      || Object.keys(response.data).length === 0
+    ) {
+      throw new Error('Invalid NAO correlation chart')
     }
-    else {
-      index_nao = 0;
-    }
+    correlationOption.value = response.data
+  } catch (error) {
+    if (requestId !== requestIds[1]) return
+    errors.value[1] = requestErrorMessage(error, 'NAOI 相关系数加载失败')
+  } finally {
+    if (requestId === requestIds[1]) loading.value[1] = false
   }
-  title_of_nao.value = title_of_nao_Array[index_nao];
-  imgSrc_of_nao.value = `${prefix}${imgSrc_of_nao_Array[index_nao]}`;
-  //text_of_temperature.value=text_of_temperature_Array[index_tempe];
 }
 
 function selectChart(index) {
-  chartSelected.value = index;
-  if (index === 2) {
-    loadEvaluationData();
+  chartSelected.value = index
+  if (index === 0 && modalImages.value.length === 0 && !loading.value[0]) {
+    availableMonths.value.length ? loadModal() : initializeModal()
+  } else if (index === 1 && !hasCorrelationData.value && !loading.value[1]) {
+    loadCorrelation()
   }
 }
 
-const moveBoxLeft = computed(() => {
-  return chartSelected.value * 250;
-});
+function handleDateChange() {
+  document.activeElement?.blur()
+  if (!selectedDate.value || limitedDateRange(selectedDate.value)) return
+  loadModal()
+}
+
+function retryActive() {
+  if (chartSelected.value === 1) return loadCorrelation()
+  return availableMonths.value.length ? loadModal() : initializeModal()
+}
+
+function changeImageIndex(direction) {
+  const total = modalImages.value.length
+  if (total < 2) return
+  modalImageIndex.value = direction === 'left'
+    ? (modalImageIndex.value - 1 + total) % total
+    : (modalImageIndex.value + 1) % total
+}
 
 const movBoxStyle = computed(() => ({
-  position: "absolute",
-  bottom: "0px",
-  left: `${moveBoxLeft.value}px`,
-  height: "2px",
-  width: "125px",
-  transform: "translateX(50%)",
-  //backgroundColor: "blue",
-  backgroundColor: "rgb(143,178,201)",
-  //backgroundColor: "rgb(92,179,204)",
-  transition: "left 0.3s ease"
-}));
-
-// 状态管理（图片加载、错误处理）
-const loading = ref({ 0: false, 1: false, 2: false });
-const errors = ref({ 0: null, 1: null, 2: null });
-
-const modalImages = ref([]);
-const modalImageIndex = ref(0);
-const currentModalImage = computed(() => {
-  return modalImages.value[modalImageIndex.value] || '';
-});
-const modalTitle = ref('');
-
-const changeImageIndex = (direction) => {
-  const len = modalImages.value.length;
-  if (len < 2) return;
-  if (direction === 'left') {
-    modalImageIndex.value = (modalImageIndex.value - 1 + len) % len;
-  } else {
-    modalImageIndex.value = (modalImageIndex.value + 1) % len;
-  }
-};
-
-const retryActive = () => {
-  if (chartSelected.value === 0) {
-    axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
-      .then(res => {
-        modalImages.value = res.data.map(src => `${prefix}${src}`);
-        modalImageIndex.value = 0;
-        errors.value[0] = null;
-        loading.value[0] = false;
-      })
-      .catch(err => {
-        errors.value[0] = '加载图片失败，请稍后重试';
-        loading.value[0] = false;
-      });
-  } else if (chartSelected.value === 1) {
-    axios.get('/nao/predictionExamination/naoi')
-      .then(res => {
-        option7.value = res.data;
-        errors.value[1] = null;
-        loading.value[1] = false;
-      })
-      .catch(err => {
-        errors.value[1] = '加载模态预测数据失败，请稍后重试';
-        loading.value[1] = false;
-      });
-  } else if (chartSelected.value === 2) {
-    loadEvaluationData();
-    errors.value[2] = null;
-    loading.value[2] = false;
-  }
-};
-
-// 初始化数据
-const initImageData = () => {
-  loading.value[0] = true;
-  axios.get('/nao/predictionExamination/nao?year=' + Number(selectedYear.value) + '&month=' + Number(selectedMonth.value))
-    .then(res => {
-      imgSrc_of_nao_Array = res.data;
-      modalImages.value = res.data.map(src => `${prefix}${src}`);
-      modalImageIndex.value = 0;
-      errors.value[0] = null;
-      loading.value[0] = false;
-    })
-    .catch(err => {
-      errors.value[0] = '加载图片失败，请稍后重试';
-      loading.value[0] = false;
-    });
-};
-
-const initModalData = () => {
-  loading.value[1] = true;
-  axios.get('/nao/predictionExamination/naoi')
-    .then(res => {
-      option7.value = res.data;
-      errors.value[1] = null;
-      loading.value[1] = false;
-    })
-    .catch(err => {
-      errors.value[1] = '加载模态预测数据失败，请稍后重试';
-      loading.value[1] = false;
-    });
-};
+  left: `${chartSelected.value * 250}px`,
+}))
 
 onMounted(() => {
-  initImageData();
-  initModalData();
-  loadEvaluationData();
-});
+  initializeModal()
+  loadCorrelation()
+})
 </script>
 
 <template>
@@ -290,34 +210,23 @@ onMounted(() => {
       </ul>
     </div>
 
-    <div style="margin: 0px 10%;">
-      <div class="datePickerContainer" v-if="chartSelected !== 1">
-        <el-date-picker @change="updateChartTitle()" v-model="selectedDateTime" type="month" :clearable="false"
-          :disabledDate="limitedDateRange" />
+    <section class="content-shell">
+      <div v-if="chartSelected === 0" class="date-picker-container">
+        <el-date-picker
+          v-model="selectedDate"
+          type="month"
+          :clearable="false"
+          :disabled="loading[0] && availableMonths.length === 0"
+          :disabled-date="limitedDateRange"
+          @change="handleDateChange"
+        />
       </div>
       <div v-else class="date-independent-note">
         该指标为固定的提前期相关系数，不随起报日期变化。
       </div>
 
-      <div class="text-container" v-if="chartSelected === 0">
-        <div class="description">
-          {{ text_of_option1 }}
-        </div>
-      </div>
-      <div class="text-container" v-if="chartSelected === 1">
-        <div class="description1">
-          {{ text_of_option7 }}
-        </div>
-      </div>
-      <div class="text-container" v-if="chartSelected === 2">
-        <div class="description1">
-          {{ evaluationDescription }}
-          <span style="font-size:14px; color:#888; display:block; margin-top:5px;">
-            （当前展示模拟数据，实际数据待后端接口 `/nao/evaluation` 就绪后自动替换）
-          </span>
-        </div>
-      </div>
-    </div>
+      <div class="description">{{ descriptions[chartSelected] }}</div>
+    </section>
 
     <section
       class="chart-selector"
@@ -330,7 +239,7 @@ onMounted(() => {
       </div>
 
       <div v-else-if="chartSelected === 0 && modalImages.length" class="picture-container">
-        <h2>{{ modalTitle || `${selectedYear}年${selectedMonth}月 预测结果分布误差图` }}</h2>
+        <h2>{{ modalTitle }}</h2>
         <p>{{ modalImageIndex + 1 }}/{{ modalImages.length }}</p>
         <img :src="currentModalImage" alt="NAO 预测结果分布误差图">
         <template v-if="modalImages.length > 1">
@@ -350,20 +259,16 @@ onMounted(() => {
           />
         </template>
       </div>
+      <el-empty
+        v-else-if="chartSelected === 0 && !loading[0]"
+        description="暂无 NAO 模态检验图片"
+      />
 
-      <div v-else-if="chartSelected === 1">
+      <template v-else-if="chartSelected === 1">
         <h2 class="chart-title">NAOI指数预测的相关系数</h2>
-        <div class="chart">
-          <v-chart :option="option7" autoresize></v-chart>
-        </div>
-      </div>
-
-      <div v-else-if="chartSelected === 2">
-        <h2 class="chart-title">NAO评估指标趋势</h2>
-        <div class="chart">
-          <v-chart :option="optionEvaluation" autoresize></v-chart>
-        </div>
-      </div>
+        <v-chart v-if="hasCorrelationData" class="chart" :option="correlationOption" autoresize />
+        <el-empty v-else-if="!loading[1]" description="暂无 NAOI 相关系数数据" />
+      </template>
     </section>
   </div>
 </template>
@@ -449,7 +354,7 @@ onMounted(() => {
   margin-left: 10%;
 }
 
-.datePickerContainer,
+.date-picker-container,
 .date-independent-note {
   display: flex;
   justify-content: flex-end;
