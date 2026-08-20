@@ -14,7 +14,12 @@ import { saveAdminSession } from '@/utils/adminAuth'
 const router = useRouter()
 const route = useRoute()
 const loading = ref(false)
-const apiBase = computed(() => import.meta.env.VITE_API_PREFIX || axios.defaults.baseURL || '未配置')
+const apiBase = computed(() => (
+  import.meta.env.VITE_API_PREFIX
+  || import.meta.env.VITE_API_BASE_URL
+  || axios.defaults.baseURL
+  || '未配置'
+))
 
 const form = reactive({
   username: 'admin',

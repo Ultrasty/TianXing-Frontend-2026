@@ -1,6 +1,8 @@
 const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '')
 
-const apiPrefix = trimTrailingSlash(import.meta.env.VITE_API_PREFIX || '')
+const apiPrefix = trimTrailingSlash(
+  import.meta.env.VITE_API_PREFIX || import.meta.env.VITE_API_BASE_URL || '',
+)
 const apiAssetFallback = apiPrefix.endsWith('/api')
   ? apiPrefix.slice(0, -4)
   : apiPrefix

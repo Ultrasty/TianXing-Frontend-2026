@@ -1,6 +1,6 @@
 import { extend } from 'umi-request'
 
-const prefix = import.meta.env.VITE_API_PREFIX || 'http://localhost:8888'
+const prefix = import.meta.env.VITE_API_PREFIX || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8888'
 
 const request = extend({
     prefix: prefix,

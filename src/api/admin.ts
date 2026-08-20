@@ -71,30 +71,6 @@ export interface ImportResult {
   updated: number
 }
 
-export interface EcmwfPreviewRequest {
-  date?: string
-  time?: number
-  step?: number
-  param: string
-  levtype?: string
-  levelist?: number
-  stream?: string
-  forecastType?: string
-  provider?: string
-  model?: string
-  reducer?: 'MEAN' | 'ROW_MEAN' | 'SAMPLE'
-  maxPoints?: number
-}
-
-export interface EcmwfPreview {
-  source: 'ECMWF'
-  dataKind: 'RAW_FIELD_REDUCTION'
-  publishable: false
-  values: unknown[]
-  metadata: Record<string, unknown>
-  notice: string
-}
-
 export interface NsidcEvaluationRequest {
   category: 'SIC' | 'SIE'
   year: string
@@ -212,14 +188,6 @@ export async function importEvaluationFile(category: EvaluationCategory, mode: I
     '/admin/evaluations/import/manual',
     form,
     { params: { category, mode } },
-  )
-  return response.data.data
-}
-
-export async function fetchEcmwfPreview(payload: EcmwfPreviewRequest) {
-  const response = await adminHttp.post<AdminApiResponse<EcmwfPreview>>(
-    '/admin/evaluations/ecmwf/preview',
-    payload,
   )
   return response.data.data
 }
