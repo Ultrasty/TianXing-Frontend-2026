@@ -456,6 +456,10 @@ function disabledDate(time) {
   return !years.has(time.getFullYear())
 }
 
+function asPercentage(values) {
+  return values.map((value) => Number(value) * 100)
+}
+
 function createLineOptions(data, date) {
   const year = date.getFullYear()
   const month = date.getMonth() + 1
@@ -498,8 +502,8 @@ function createLineOptions(data, date) {
       },
       yAxis: { type: 'value', name: 'BACC(%)' },
       series: [
-        { name: 'ours', type: 'line', data: bacc },
-        { name: 'persistence', type: 'line', data: persistenceBacc },
+        { name: 'ours', type: 'line', data: asPercentage(bacc) },
+        { name: 'persistence', type: 'line', data: asPercentage(persistenceBacc) },
       ],
     },
     {
@@ -510,8 +514,8 @@ function createLineOptions(data, date) {
       },
       yAxis: { type: 'value', name: 'RMSE(%)' },
       series: [
-        { name: 'ours', type: 'line', data: rmse },
-        { name: 'persistence', type: 'line', data: persistenceRmse },
+        { name: 'ours', type: 'line', data: asPercentage(rmse) },
+        { name: 'persistence', type: 'line', data: asPercentage(persistenceRmse) },
       ],
     },
   ]
@@ -534,7 +538,7 @@ function createBoxOption(data, date) {
       left: 'center',
     },
     dataset: [
-      ...sources.map((source) => ({ source })),
+      ...sources.map((source) => ({ source: source.map(asPercentage) })),
       ...sources.map((_, index) => ({
         fromDatasetIndex: index,
         transform: { type: 'boxplot' },
@@ -846,6 +850,20 @@ onMounted(async () => {
 .charts-shell {
   margin-right: 10%;
   margin-left: 10%;
+}
+
+.charts-shell {
+  min-height: 420px;
+}
+
+.chart-container {
+  min-height: 420px;
+  margin-bottom: 24px;
+}
+
+.chart {
+  width: 100%;
+  height: 420px;
 }
 
 .date-picker-container {
