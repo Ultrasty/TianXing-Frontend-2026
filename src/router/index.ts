@@ -2,28 +2,16 @@ import { hasValidAdminSession } from '@/utils/adminAuth'
 import ENSOForecastExamination from '@/views/ENSO/ForecastExamination.vue'
 import ENSOForecastResult from '@/views/ENSO/ForecastResult.vue'
 import GlobalWeatherForecastResult from '@/views/GlobalWeather/ForecastResult.vue'
-
-// SeaIce components
 import SeaIceForecastResult from '@/views/SeaIce/ForecastResult.vue'
 import SeaIceForecastExamination from '@/views/SeaIce/ForecastExamination.vue'
-
-// NAO components
-// Import SeaIce components
-import SeaIce_ForecastResult from '@/views/SeaIce/ForecastResult.vue'
-import SeaIce_ForecastExamination from '@/views/SeaIce/ForecastExamination.vue'
-
 import NAOForecastResult from '@/views/NAO/ForecastResult.vue'
 import NAOForecastExamination from '@/views/NAO/ForecastExamination.vue'
-
-// Admin pages
 import UserView from '@/views/user/UserView.vue'
 import AdminLogin from '@/views/admin/AdminLogin.vue'
 import AdminDashboard from '@/views/admin/AdminDashboard.vue'
 import AdminForecastResultImagePublish from '@/views/admin/ForecastResultImagePublish.vue'
 import ExaminationManage from '@/views/admin/ExaminationManage.vue'
-
 import AdminForecastData from '@/views/admin/ForecastDataAdmin.vue'
-import { ADMIN_TOKEN_KEY } from '@/api/admin'
 import { createRouter, createWebHashHistory } from 'vue-router'
 
 const router = createRouter({
@@ -54,14 +42,14 @@ const router = createRouter({
             meta: { title: '预报评估数据管理', requiresAdminAuth: true }
         },
         {
-            name: 'AdminForecastData',
             path: '/admin/forecast-data',
+            name: 'AdminForecastData',
             component: AdminForecastData,
-            meta: { title: 'Forecast Data Admin', requiresAdmin: true },
+            meta: { title: '预报数据管理', requiresAdminAuth: true }
         },
         {
             name: 'home',
-            path: '/',  
+            path: '/',
             component: UserView,
             redirect: { name: 'ENSO_ForecastExamination' },
             children: [
@@ -112,12 +100,13 @@ const router = createRouter({
     ],
 })
 
-// 全局路由守卫
+// 全局路由守卫（合并了 cp-temp 的 requiresAdmin 检查）
 router.beforeEach((to, _from, next) => {
     const authenticated = hasValidAdminSession()
     
-    // 需要管理员认证的路由
-    if (to.meta.requiresAdminAuth && !authenticated) {
+    // 需要管理员认证的路由（同时支持 requiresAdminAuth 和 requiresAdmin）
+    const requiresAuth = to.meta.requiresAdminAuth || to.meta.requiresAdmin
+    if (requiresAuth && !authenticated) {
         next({
             name: 'AdminLogin',
             query: { redirect: to.fullPath },
@@ -137,14 +126,6 @@ router.beforeEach((to, _from, next) => {
     }
     
     next()
-router.beforeEach((to) => {
-    if (to.meta.requiresAdmin && !localStorage.getItem(ADMIN_TOKEN_KEY)) {
-        return { name: 'AdminLogin' }
-    }
-    if (to.name === 'AdminLogin' && localStorage.getItem(ADMIN_TOKEN_KEY)) {
-        return { name: 'AdminForecastData' }
-    }
-    return true
 })
 
 export default router

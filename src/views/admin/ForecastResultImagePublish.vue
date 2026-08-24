@@ -229,6 +229,7 @@ function formatSize(size?: number) {
         <span>后台系统</span>
       </div>
         <div class="admin-actions">
+          <el-button size="small" @click="router.push('/admin/forecast-data')">📊 预报数据管理</el-button>
           <el-button size="small" @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
           <el-button size="small" type="primary">🖼️ 结果图发布</el-button>
           <el-button size="small" @click="router.push({ name: 'home' })">🏠 公开站点</el-button>
