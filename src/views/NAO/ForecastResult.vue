@@ -1,123 +1,3 @@
-<template>
-  <div class="page-content">
-    <div class="banner">
-      <img :src="bannerImg" alt="">
-      <h3 class="page-title">NAO预测结果</h3>
-    </div>
-
-    <div class="menu-container">
-      <ul class="menu">
-        <div :style="movBoxStyle" class="mov-box"></div>
-        <li
-          v-for="(chartName, index) of chartNames"
-          :key="chartName"
-          @click="selectChart(index)"
-          :class="{ 'chart-name-selected': chartSelected === index }"
-        >
-          <p>{{ chartName }}</p>
-        </li>
-      </ul>
-    </div>
-
-    <div style="margin: 0px 10%;">
-      <div class="datePickerContainer">
-        <el-date-picker
-          v-if="selectedNAOI"
-          v-model="naoDate"
-          type="month"
-          :clearable="false"
-          :disabled-date="NAOIDisabledDate"
-          @change="updateNAOIChart"
-        />
-        <el-date-picker
-          v-if="selectedSLP"
-          v-model="slpDate"
-          type="month"
-          :clearable="false"
-          :disabled-date="SLPDisabledDate"
-          @change="updateSLPChart"
-        />
-      </div>
-
-      <div
-        class="text-container"
-        v-if="chartSelected === 0"
-      >
-        <div class="description">
-          {{ NAOIDescription }}
-        </div>
-      </div>
-    </div>
-
-    <div>
-      <p></p>
-    </div>
-
-    <div
-      class="chart-selector"
-      v-if="chartSelected === 0"
-    >
-      <v-chart
-        class="NAOIChart"
-        :option="NAOIOption"
-        autoresize
-      />
-    </div>
-
-    <div
-      class="chart-selector"
-      v-else-if="chartSelected === 1"
-    >
-      <div class="imgContainer">
-        <h3
-          v-show="!SLPLoading"
-          style="position:relative;text-align:center;margin-top:0;margin-bottom:15px;z-index:1;"
-        >
-          {{ SLPChartTitle }}
-        </h3>
-
-        <h4
-          v-if="!SLPLoading && imgSrc.length"
-          style="position:relative;text-align:center;margin-top:0;margin-bottom:15px;font-size:16px;z-index:1;"
-        >
-          ({{ imgIndex + 1 }}/{{ imgSrc.length }})
-        </h4>
-
-        <h4
-          v-else-if="!SLPLoading"
-          style="position:relative;text-align:center;font-size:16px;z-index:1;"
-        >
-          当前月份暂无模态预测图片
-        </h4>
-
-        <img
-          v-if="imgSrc.length"
-          :src="`${prefix}${imgSrc[imgIndex]}`"
-          class="image"
-          alt=""
-        />
-      </div>
-
-      <el-button
-        ref="buttonLeft"
-        type="primary"
-        class="arrowLeft"
-        :icon="ArrowLeft"
-        :disabled="!imgSrc.length"
-        @click="changeIndex('left')"
-      />
-      <el-button
-        ref="buttonRight"
-        type="primary"
-        class="arrowRight"
-        :icon="ArrowRight"
-        :disabled="!imgSrc.length"
-        @click="changeIndex('right')"
-      />
-    </div>
-  </div>
-</template>
-
 <script setup>
 import { ref, computed, onMounted } from "vue";
 import axios from "axios";
@@ -392,6 +272,126 @@ onMounted(async () => {
 });
 </script>
 
+<template>
+  <div class="page-content">
+    <div class="banner">
+      <img :src="bannerImg" alt="">
+      <h3 class="page-title">NAO预测结果</h3>
+    </div>
+
+    <div class="menu-container">
+      <ul class="menu">
+        <div :style="movBoxStyle" class="mov-box"></div>
+        <li
+          v-for="(chartName, index) of chartNames"
+          :key="chartName"
+          @click="selectChart(index)"
+          :class="{ 'chart-name-selected': chartSelected === index }"
+        >
+          <p>{{ chartName }}</p>
+        </li>
+      </ul>
+    </div>
+
+    <div style="margin: 0px 10%;">
+      <div class="datePickerContainer">
+        <el-date-picker
+          v-if="selectedNAOI"
+          v-model="naoDate"
+          type="month"
+          :clearable="false"
+          :disabled-date="NAOIDisabledDate"
+          @change="updateNAOIChart"
+        />
+        <el-date-picker
+          v-if="selectedSLP"
+          v-model="slpDate"
+          type="month"
+          :clearable="false"
+          :disabled-date="SLPDisabledDate"
+          @change="updateSLPChart"
+        />
+      </div>
+
+      <div
+        class="text-container"
+        v-if="chartSelected === 0"
+      >
+        <div class="description">
+          {{ NAOIDescription }}
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <p></p>
+    </div>
+
+    <div
+      class="chart-selector"
+      v-if="chartSelected === 0"
+    >
+      <v-chart
+        class="NAOIChart"
+        :option="NAOIOption"
+        autoresize
+      />
+    </div>
+
+    <div
+      class="chart-selector"
+      v-else-if="chartSelected === 1"
+    >
+      <div class="imgContainer">
+        <h3
+          v-show="!SLPLoading"
+          style="position:relative;text-align:center;margin-top:0;margin-bottom:15px;z-index:1;"
+        >
+          {{ SLPChartTitle }}
+        </h3>
+
+        <h4
+          v-if="!SLPLoading && imgSrc.length"
+          style="position:relative;text-align:center;margin-top:0;margin-bottom:15px;font-size:16px;z-index:1;"
+        >
+          ({{ imgIndex + 1 }}/{{ imgSrc.length }})
+        </h4>
+
+        <h4
+          v-else-if="!SLPLoading"
+          style="position:relative;text-align:center;font-size:16px;z-index:1;"
+        >
+          当前月份暂无模态预测图片
+        </h4>
+
+        <img
+          v-if="imgSrc.length"
+          :src="`${prefix}${imgSrc[imgIndex]}`"
+          class="image"
+          alt=""
+        />
+      </div>
+
+      <el-button
+        ref="buttonLeft"
+        type="primary"
+        class="arrowLeft"
+        :icon="ArrowLeft"
+        :disabled="!imgSrc.length"
+        @click="changeIndex('left')"
+      />
+      <el-button
+        ref="buttonRight"
+        type="primary"
+        class="arrowRight"
+        :icon="ArrowRight"
+        :disabled="!imgSrc.length"
+        @click="changeIndex('right')"
+      />
+    </div>
+  </div>
+</template>
+
 <style scoped lang="scss">
 .title {
   font-family: 'STXinwei';
@@ -547,6 +547,22 @@ ul.menu li.chart-name-selected:hover p {
 
 .chart-name-selected {
   color: rgb(30, 158, 179);
+}
+
+.date-picker-container {
+  display: flex;
+  justify-content: flex-end;
+  padding: 50px 0 18px;
+}
+
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.delete-btn {
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.12);
 }
 
 .text-container {

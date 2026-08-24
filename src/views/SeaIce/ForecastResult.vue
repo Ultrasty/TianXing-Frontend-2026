@@ -45,7 +45,6 @@ const sicTitle = computed(() => {
   if (!date) return '海冰 SIC 预测结果'
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 海冰SIC预测结果`
 })
-
 function toNumber(value) {
   const number = Number(value)
   return Number.isInteger(number) ? number : null
@@ -515,7 +514,17 @@ onMounted(async () => {
 .date-picker-container {
   display: flex;
   justify-content: flex-end;
-  padding: 50px 0 30px;
+  padding: 50px 0 18px;
+}
+
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.delete-btn {
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.12);
 }
 
 .description {

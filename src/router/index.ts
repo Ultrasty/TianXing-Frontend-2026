@@ -1,3 +1,4 @@
+import { createRouter, createWebHashHistory } from 'vue-router'
 import { hasValidAdminSession } from '@/utils/adminAuth'
 import ENSOForecastExamination from '@/views/ENSO/ForecastExamination.vue'
 import ENSOForecastResult from '@/views/ENSO/ForecastResult.vue'
@@ -12,120 +13,116 @@ import AdminDashboard from '@/views/admin/AdminDashboard.vue'
 import AdminForecastResultImagePublish from '@/views/admin/ForecastResultImagePublish.vue'
 import ExaminationManage from '@/views/admin/ExaminationManage.vue'
 import AdminForecastData from '@/views/admin/ForecastDataAdmin.vue'
-import { createRouter, createWebHashHistory } from 'vue-router'
 
 const router = createRouter({
-    history: createWebHashHistory(),
-    routes: [
+  history: createWebHashHistory('/tianxing'),
+  routes: [
+    {
+      path: '/admin/login',
+      name: 'AdminLogin',
+      component: AdminLogin,
+      meta: { title: '管理员登录' },
+    },
+    {
+      path: '/admin/dashboard',
+      name: 'AdminDashboard',
+      component: AdminDashboard,
+      meta: { title: '管理后台概览', requiresAdminAuth: true },
+    },
+    {
+      path: '/admin/forecast-result-images/publish',
+      name: 'AdminForecastResultImagePublish',
+      component: AdminForecastResultImagePublish,
+      meta: { title: '预报结果图发布', requiresAdminAuth: true },
+    },
+    {
+      path: '/admin/evaluations',
+      name: 'ExaminationManage',
+      component: ExaminationManage,
+      meta: { title: '预报评估数据管理', requiresAdminAuth: true },
+    },
+    {
+      path: '/admin/forecast-data',
+      name: 'AdminForecastData',
+      component: AdminForecastData,
+      meta: { title: '预报数据管理', requiresAdminAuth: true },
+    },
+    {
+      name: 'home',
+      path: '/',
+      component: UserView,
+      redirect: { name: 'ENSO_ForecastExamination' },
+      children: [
         {
-            path: '/admin/login',
-            name: 'AdminLogin',
-            component: AdminLogin,
-            meta: { title: '管理员登录' }
+          name: 'ENSO_ForecastExamination',
+          meta: { title: 'ENSO_ForecastExamination' },
+          path: 'ENSO_ForecastExamination',
+          component: ENSOForecastExamination,
         },
         {
-            path: '/admin/dashboard',
-            name: 'AdminDashboard',
-            component: AdminDashboard,
-            meta: { title: '管理后台概览', requiresAdminAuth: true }
+          name: 'ENSO_ForecastResult',
+          meta: { title: 'ENSO_ForecastResult' },
+          path: 'ENSO_ForecastResult',
+          component: ENSOForecastResult,
         },
         {
-            path: '/admin/forecast-result-images/publish',
-            name: 'AdminForecastResultImagePublish',
-            component: AdminForecastResultImagePublish,
-            meta: { title: '预报结果图发布', requiresAdminAuth: true }
+          name: 'GlobalWeather_ForecastResult',
+          meta: { title: 'GlobalWeather_ForecastResult' },
+          path: 'GlobalWeather_ForecastResult',
+          component: GlobalWeatherForecastResult,
         },
         {
-            path: '/admin/evaluations',
-            name: 'ExaminationManage',
-            component: ExaminationManage,
-            meta: { title: '预报评估数据管理', requiresAdminAuth: true }
+          name: 'SeaIce_ForecastResult',
+          meta: { title: 'SeaIce Forecast Result' },
+          path: 'SeaIce/ForecastResult',
+          component: SeaIceForecastResult,
         },
         {
-            path: '/admin/forecast-data',
-            name: 'AdminForecastData',
-            component: AdminForecastData,
-            meta: { title: '预报数据管理', requiresAdminAuth: true }
+          name: 'SeaIce_ForecastExamination',
+          meta: { title: 'SeaIce Forecast Examination' },
+          path: 'SeaIce/ForecastExamination',
+          component: SeaIceForecastExamination,
         },
         {
-            name: 'home',
-            path: '/',
-            component: UserView,
-            redirect: { name: 'ENSO_ForecastExamination' },
-            children: [
-                {
-                    name: 'ENSO_ForecastExamination',
-                    meta: { title: 'ENSO_ForecastExamination' },
-                    path: 'ENSO_ForecastExamination',
-                    component: ENSOForecastExamination,
-                },
-                {
-                    name: 'ENSO_ForecastResult',
-                    meta: { title: 'ENSO_ForecastResult' },
-                    path: 'ENSO_ForecastResult',
-                    component: ENSOForecastResult,
-                },
-                {
-                    name: 'GlobalWeather_ForecastResult',
-                    meta: { title: 'GlobalWeather_ForecastResult' },
-                    path: 'GlobalWeather_ForecastResult',
-                    component: GlobalWeatherForecastResult,
-                },
-                {
-                    name: 'SeaIce_ForecastResult',
-                    meta: { title: 'SeaIce Forecast Result' },
-                    path: 'SeaIce/ForecastResult',
-                    component: SeaIceForecastResult,
-                },
-                {
-                    name: 'SeaIce_ForecastExamination',
-                    meta: { title: 'SeaIce Forecast Examination' },
-                    path: 'SeaIce/ForecastExamination',
-                    component: SeaIceForecastExamination,
-                },
-                {
-                    name: 'NAO_ForecastResult',
-                    meta: { title: 'NAO_ForecastResult' },
-                    path: 'NAO_ForecastResult',
-                    component: NAOForecastResult,
-                },
-                {
-                    name: 'NAO_ForecastExamination',
-                    meta: { title: 'NAO_ForecastExamination' },
-                    path: 'NAO_ForecastExamination',
-                    component: NAOForecastExamination,
-                },
-            ],
+          name: 'NAO_ForecastResult',
+          meta: { title: 'NAO_ForecastResult' },
+          path: 'NAO_ForecastResult',
+          component: NAOForecastResult,
         },
-    ],
+        {
+          name: 'NAO_ForecastExamination',
+          meta: { title: 'NAO_ForecastExamination' },
+          path: 'NAO_ForecastExamination',
+          component: NAOForecastExamination,
+        },
+      ],
+    },
+  ],
 })
 
-// 全局路由守卫（合并了 cp-temp 的 requiresAdmin 检查）
+// 全局路由守卫（支持 requiresAdminAuth 和 requiresAdmin）
 router.beforeEach((to, _from, next) => {
-    const authenticated = hasValidAdminSession()
-    
-    // 需要管理员认证的路由（同时支持 requiresAdminAuth 和 requiresAdmin）
-    const requiresAuth = to.meta.requiresAdminAuth || to.meta.requiresAdmin
-    if (requiresAuth && !authenticated) {
-        next({
-            name: 'AdminLogin',
-            query: { redirect: to.fullPath },
-        })
-        return
-    }
-    
-    // 访客专用路由（如登录页），已登录则重定向到管理页
-    if (to.meta.guestOnly && authenticated) {
-        next({ name: 'ExaminationManage' })
-        return
-    }
-    
-    // 设置页面标题
-    if (typeof to.meta.title === 'string') {
-        document.title = `${to.meta.title} - 天行平台`
-    }
-    
-    next()
+  const authenticated = hasValidAdminSession()
+
+  const requiresAuth = to.meta.requiresAdminAuth || to.meta.requiresAdmin
+  if (requiresAuth && !authenticated) {
+    next({
+      name: 'AdminLogin',
+      query: { redirect: to.fullPath },
+    })
+    return
+  }
+
+  if (to.meta.guestOnly && authenticated) {
+    next({ name: 'ExaminationManage' })
+    return
+  }
+
+  if (typeof to.meta.title === 'string') {
+    document.title = `${to.meta.title} - 天行平台`
+  }
+
+  next()
 })
 
 export default router

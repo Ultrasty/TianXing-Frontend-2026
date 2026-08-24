@@ -347,7 +347,17 @@ initPage();
 .content-shell .date-picker-container {
   display: flex;
   justify-content: flex-end;
-  padding: 50px 0 30px;
+  padding: 50px 0 18px;
+}
+
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.delete-btn {
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.12);
 }
 
 .chart-wrapper {
