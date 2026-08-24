@@ -4,8 +4,7 @@ import axios from "axios";
 import VChart from "vue-echarts";
 import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
 import bannerImg from "@/assets/enso1.jpg";
-
-const prefix = "https://tianxing.tongji.edu.cn";
+import { preloadImages, resolveImageUrl, useOnlineImageFallback } from "@/utils/image";
 
 // Tab
 const chartSelected = ref(0);
@@ -117,8 +116,9 @@ async function loadModeChart() {
     imgSrc_of_heat_Array = res.data?.data || [];
     title_of_heat_Array = res.data?.titles || [];
     if (imgSrc_of_heat_Array.length > 0) {
-      imgSrc_of_heat.value = `${prefix}${imgSrc_of_heat_Array[0]}`;
+      imgSrc_of_heat.value = resolveImageUrl(imgSrc_of_heat_Array[0]);
       title_of_heat.value = title_of_heat_Array[0] || "";
+      preloadImages(imgSrc_of_heat_Array);
     } else {
       imgSrc_of_heat.value = "";
       title_of_heat.value = "当前月份暂无模态预测数据";
@@ -178,7 +178,7 @@ function change_time_heat(flag) {
   } else {
     index_heat = index_heat < total - 1 ? index_heat + 1 : 0;
   }
-  imgSrc_of_heat.value = `${prefix}${imgSrc_of_heat_Array[index_heat]}`;
+  imgSrc_of_heat.value = resolveImageUrl(imgSrc_of_heat_Array[index_heat]);
   title_of_heat.value = title_of_heat_Array[index_heat] || "";
 }
 
@@ -248,7 +248,7 @@ initPage();
       <div v-else class="chart-selector">
         <div class="pic_container">
           <p class="picture_title">{{ title_of_heat }}</p>
-          <img v-if="imgSrc_of_heat" style="max-height:90%;" :src="imgSrc_of_heat" alt="">
+          <img v-if="imgSrc_of_heat" style="max-height:90%;" :src="imgSrc_of_heat" alt="" @error="useOnlineImageFallback">
           <el-button
             ref="buttonLeft"
             type="primary"

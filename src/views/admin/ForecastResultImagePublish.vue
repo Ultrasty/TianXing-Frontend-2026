@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, CopyDocument, Delete, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { clearAdminSession } from '@/utils/adminAuth'
 import adminRequest from '@/utils/adminRequest'
-import { preloadImages, resolveImageUrl } from '@/utils/image'
+import { preloadImages, resolveImageUrl, useOnlineImageFallback } from '@/utils/image'
 import bg from '@/assets/bg.png'
 import logoImg from '@/assets/logo-img.png'
 import logoText from '@/assets/logo-txt-b.png'
@@ -642,7 +642,7 @@ function releaseManualPreviews() {
 
       <div v-if="managedImages.length" class="managed-preview">
         <div class="managed-image-box">
-          <img :src="currentManagedImage" :alt="currentManagedTitle" />
+          <img :src="currentManagedImage" :alt="currentManagedTitle" @error="useOnlineImageFallback" />
           <template v-if="managedImages.length > 1">
             <el-button class="managed-arrow left" type="primary" :icon="ArrowLeft" aria-label="上一张" @click="changeManagedImage('left')" />
             <el-button class="managed-arrow right" type="primary" :icon="ArrowRight" aria-label="下一张" @click="changeManagedImage('right')" />
