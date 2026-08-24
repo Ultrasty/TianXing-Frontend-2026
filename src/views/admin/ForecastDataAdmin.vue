@@ -479,8 +479,10 @@ onMounted(async () => {
         <p>功能 2.1–2.3：更新、删除、发布新的预报数据</p>
       </div>
       <div>
+        <el-button type="primary" plain disabled>📊 预报数据管理</el-button>
         <el-button @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
         <el-button @click="router.push('/admin/forecast-result-images/publish')">🖼️ 结果图发布</el-button>
+        <el-button @click="router.push({ name: 'home' })">🏠 公开站点</el-button>
         <el-button @click="logout">退出登录</el-button>
       </div>
     </div>
