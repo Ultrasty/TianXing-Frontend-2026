@@ -1,230 +1,206 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import axios from 'axios'
-import VChart from 'vue-echarts'
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
-import bannerImg from '@/assets/enso1.jpg'
-import { preloadImages, resolveImageUrl } from '@/utils/image'
-import { requestErrorMessage } from '@/utils/requestError'
+import { ref, reactive, computed } from "vue";
+import axios from "axios";
+import VChart from "vue-echarts";
+import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
+import bannerImg from "@/assets/enso1.jpg";
 
-const chartNames = ['指数预测', '模态预测']
-const chartSelected = ref(0)
+const prefix = "https://tianxing.tongji.edu.cn";
 
-const dateRanges = ref([
-  { start: null, end: null },
-  { start: null, end: null },
-])
-const selectedDates = ref([null, null])
-const rangeLoading = ref([false, false])
-const rangeErrors = ref(['', ''])
-const dataLoading = ref([false, false])
-const dataErrors = ref(['', ''])
-const rangeRequestIds = [0, 0]
-const requestIds = [0, 0]
+// Tab
+const chartSelected = ref(0);
+const chartNames = ["指数预测", "模态预测"];
 
-const chart1 = ref({})
-const chart1Description = ref('此处为预测结果指数预测折线图。')
-const heatImages = ref([])
-const heatTitles = ref([])
-const heatIndex = ref(0)
+// 两个页面分别保存自己的日期
+const indexDate = ref(null);
+const modeDate = ref(null);
 
+// 可用月份集合
+const indexAvailableMonths = ref(new Set());
+const modeAvailableMonths = ref(new Set());
+
+// DatePicker 绑定值（根据当前 Tab 切换）
 const currentDate = computed({
-  get: () => selectedDates.value[chartSelected.value],
-  set: (value) => {
-    selectedDates.value[chartSelected.value] = value
+  get() {
+    return chartSelected.value === 0 ? indexDate.value : modeDate.value;
   },
-})
-const activeRange = computed(() => dateRanges.value[chartSelected.value])
-const currentHeatImage = computed(() => resolveImageUrl(heatImages.value[heatIndex.value]))
-const currentHeatTitle = computed(() => heatTitles.value[heatIndex.value] || '')
-const hasIndexChart = computed(() => Object.keys(chart1.value || {}).length > 0)
-
-function parseYearMonth(value) {
-  const match = /^(\d{4})-(\d{1,2})$/.exec(String(value || '').trim())
-  if (!match) return null
-
-  const year = Number(match[1])
-  const month = Number(match[2])
-  if (month < 1 || month > 12) return null
-  return new Date(year, month - 1, 1)
-}
-
-function monthNumber(date) {
-  return date.getFullYear() * 12 + date.getMonth()
-}
-
-function isWithinRange(date, range) {
-  if (!date || !range?.start || !range?.end) return false
-  const value = monthNumber(date)
-  return value >= monthNumber(range.start) && value <= monthNumber(range.end)
-}
-
-function limitedDateRange(time) {
-  if (!activeRange.value?.start || !activeRange.value?.end) return false
-  return !isWithinRange(time, activeRange.value)
-}
-
-async function loadRange(index) {
-  const requestId = ++rangeRequestIds[index]
-  const isIndexTab = index === 0
-  rangeLoading.value[index] = true
-  rangeErrors.value[index] = ''
-
-  try {
-    const response = await axios.get(
-      isIndexTab
-        ? '/enso/linechart/getInitData'
-        : '/imgs/predictionResult/ssta/getInitData',
-    )
-    if (requestId !== rangeRequestIds[index]) return
-
-    const start = parseYearMonth(
-      isIndexTab ? response.data?.earliestDate : response.data?.start,
-    )
-    const end = parseYearMonth(
-      isIndexTab ? response.data?.latestDate : response.data?.end,
-    )
-
-    if (!start || !end || monthNumber(start) > monthNumber(end)) {
-      throw new Error('Invalid ENSO date range')
-    }
-
-    dateRanges.value[index] = { start, end }
-    if (!isWithinRange(selectedDates.value[index], dateRanges.value[index])) {
-      selectedDates.value[index] = new Date(end)
-    }
-  } catch (error) {
-    if (requestId !== rangeRequestIds[index]) return
-    dateRanges.value[index] = { start: null, end: null }
-    rangeErrors.value[index] = requestErrorMessage(
-      error,
-      `${chartNames[index]}可选日期加载失败`,
-    )
-  } finally {
-    if (requestId === rangeRequestIds[index]) {
-      rangeLoading.value[index] = false
+  set(value) {
+    if (chartSelected.value === 0) {
+      indexDate.value = value;
+    } else {
+      modeDate.value = value;
     }
   }
+});
+
+// 日期工具
+function dateToMonthKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
 }
+
+function monthKeyToDate(key) {
+  if (!key) return null;
+  const [year, month] = key.split("-").map(Number);
+  return new Date(year, month - 1, 1);
+}
+
+function getLatestMonth(monthSet) {
+  const months = Array.from(monthSet).sort();
+  if (months.length === 0) return null;
+  return monthKeyToDate(months[months.length - 1]);
+}
+
+// 日期禁用规则
+const limitedDateRange = (time) => {
+  const key = dateToMonthKey(time);
+  if (chartSelected.value === 0) {
+    return !indexAvailableMonths.value.has(key);
+  }
+  return !modeAvailableMonths.value.has(key);
+};
+
+// 指数预测
+const chart1 = ref({});
+const chart1Title = ref("**年*月~**年*月Niño3.4指数结果预测");
+const Chart1_Description = reactive({
+  single: true,
+  text: "此处为预测结果指数预测折线图。"
+});
 
 async function loadIndexChart() {
-  const date = selectedDates.value[0]
-  if (!date) return
-
-  const requestId = ++requestIds[0]
-  dataLoading.value[0] = true
-  dataErrors.value[0] = ''
-  chart1.value = {}
-
+  if (!indexDate.value) {
+    chart1.value = {};
+    return;
+  }
+  const year = indexDate.value.getFullYear();
+  const month = indexDate.value.getMonth() + 1;
   try {
-    const response = await axios.get('/enso/predictionResult/linechart', {
-      params: {
-        year: date.getFullYear(),
-        month: date.getMonth() + 1,
-      },
-    })
-    if (requestId !== requestIds[0]) return
-    if (
-      !response.data
-      || typeof response.data !== 'object'
-      || Object.keys(response.data).length === 0
-    ) {
-      throw new Error('Invalid ENSO index response')
-    }
-    chart1.value = response.data
+    const res = await axios.get(`/enso/predictionResult/linechart?year=${year}&month=${month}`);
+    chart1.value = res.data;
   } catch (error) {
-    if (requestId !== requestIds[0]) return
-    dataErrors.value[0] = requestErrorMessage(error, 'ENSO 指数预测加载失败')
-  } finally {
-    if (requestId === requestIds[0]) dataLoading.value[0] = false
-  }
-}
-
-async function loadModeImages() {
-  const date = selectedDates.value[1]
-  if (!date) return
-
-  const requestId = ++requestIds[1]
-  dataLoading.value[1] = true
-  dataErrors.value[1] = ''
-  heatImages.value = []
-  heatTitles.value = []
-  heatIndex.value = 0
-
-  try {
-    const response = await axios.get('/imgs/predictionResult/ssta', {
-      params: {
-        year: date.getFullYear(),
-        month: date.getMonth() + 1,
-      },
-    })
-    if (requestId !== requestIds[1]) return
-
-    const images = Array.isArray(response.data?.data)
-      ? response.data.data.filter((item) => typeof item === 'string' && item)
-      : []
-    if (images.length === 0) {
-      throw new Error('Empty ENSO mode image list')
-    }
-
-    heatImages.value = images
-    heatTitles.value = Array.isArray(response.data?.titles)
-      ? response.data.titles
-      : []
-    preloadImages(images)
-  } catch (error) {
-    if (requestId !== requestIds[1]) return
-    dataErrors.value[1] = requestErrorMessage(error, 'ENSO 模态预测加载失败')
-  } finally {
-    if (requestId === requestIds[1]) dataLoading.value[1] = false
-  }
-}
-
-function loadActiveData() {
-  return chartSelected.value === 0 ? loadIndexChart() : loadModeImages()
-}
-
-async function selectChart(index) {
-  chartSelected.value = index
-  if (!activeRange.value?.start) {
-    await loadRange(index)
-  }
-
-  if (index === 0 && !hasIndexChart.value) {
-    await loadIndexChart()
-  } else if (index === 1 && heatImages.value.length === 0) {
-    await loadModeImages()
+    console.error("加载 ENSO 指数预测失败", error);
+    chart1.value = {};
   }
 }
 
 function handleDateChange() {
-  document.activeElement?.blur()
-  loadActiveData()
+  document.activeElement?.blur();
+  if (chartSelected.value === 0) {
+    loadIndexChart();
+  } else {
+    loadModeChart();
+  }
 }
 
-async function retryRange() {
-  await loadRange(chartSelected.value)
-  if (activeRange.value?.start) await loadActiveData()
+// 模态预测
+let index_heat = 0;
+let imgSrc_of_heat_Array = [];
+let title_of_heat_Array = [];
+const imgSrc_of_heat = ref("");
+const title_of_heat = ref("");
+
+async function loadModeChart() {
+  if (!modeDate.value) {
+    imgSrc_of_heat_Array = [];
+    title_of_heat_Array = [];
+    imgSrc_of_heat.value = "";
+    title_of_heat.value = "";
+    return;
+  }
+  const year = modeDate.value.getFullYear();
+  const month = modeDate.value.getMonth() + 1;
+  try {
+    const res = await axios.get(`/imgs/predictionResult/ssta?year=${year}&month=${month}`);
+    index_heat = 0;
+    imgSrc_of_heat_Array = res.data?.data || [];
+    title_of_heat_Array = res.data?.titles || [];
+    if (imgSrc_of_heat_Array.length > 0) {
+      imgSrc_of_heat.value = `${prefix}${imgSrc_of_heat_Array[0]}`;
+      title_of_heat.value = title_of_heat_Array[0] || "";
+    } else {
+      imgSrc_of_heat.value = "";
+      title_of_heat.value = "当前月份暂无模态预测数据";
+    }
+  } catch (error) {
+    console.error("加载 ENSO 模态预测失败", error);
+    imgSrc_of_heat_Array = [];
+    title_of_heat_Array = [];
+    imgSrc_of_heat.value = "";
+    title_of_heat.value = "模态预测数据加载失败";
+  }
 }
 
-function changeHeatIndex(direction) {
-  const total = heatImages.value.length
-  if (total < 2) return
-
-  heatIndex.value = direction === 'left'
-    ? (heatIndex.value - 1 + total) % total
-    : (heatIndex.value + 1) % total
+// 获取可用月份
+async function loadIndexAvailableMonths() {
+  try {
+    const res = await axios.get("/enso/linechart/getInitData");
+    const months = res.data?.availableMonths || [];
+    indexAvailableMonths.value = new Set(months);
+    indexDate.value = getLatestMonth(indexAvailableMonths.value);
+  } catch (error) {
+    console.error("获取指数预测可用月份失败", error);
+    indexAvailableMonths.value = new Set();
+    indexDate.value = null;
+  }
 }
 
-const moveBoxLeft = computed(() => chartSelected.value * 250)
+async function loadModeAvailableMonths() {
+  try {
+    const res = await axios.get("/imgs/predictionResult/ssta/getInitData");
+    const months = res.data?.availableMonths || [];
+    modeAvailableMonths.value = new Set(months);
+    modeDate.value = getLatestMonth(modeAvailableMonths.value);
+  } catch (error) {
+    console.error("获取模态预测可用月份失败", error);
+    modeAvailableMonths.value = new Set();
+    modeDate.value = null;
+  }
+}
+
+// 切换 Tab
+async function selectChart(index) {
+  chartSelected.value = index;
+  if (index === 0) {
+    await loadIndexChart();
+  } else {
+    await loadModeChart();
+  }
+}
+
+// 模态图片左右切换
+function change_time_heat(flag) {
+  const total = imgSrc_of_heat_Array.length;
+  if (total === 0) return;
+  if (flag === "left") {
+    index_heat = index_heat > 0 ? index_heat - 1 : total - 1;
+  } else {
+    index_heat = index_heat < total - 1 ? index_heat + 1 : 0;
+  }
+  imgSrc_of_heat.value = `${prefix}${imgSrc_of_heat_Array[index_heat]}`;
+  title_of_heat.value = title_of_heat_Array[index_heat] || "";
+}
+
+// Tab 样式
+const moveBoxLeft = computed(() => chartSelected.value * 250);
 const movBoxStyle = computed(() => ({
+  position: "absolute",
+  bottom: "0px",
   left: `${moveBoxLeft.value}px`,
-}))
+  height: "2px",
+  width: "125px",
+  transform: "translateX(50%)",
+  backgroundColor: "rgb(143,178,201)",
+  transition: "left 0.3s ease"
+}));
 
-onMounted(async () => {
-  await Promise.all([loadRange(0), loadRange(1)])
-  if (dateRanges.value[0].start) await loadIndexChart()
-})
+// 页面初始化
+async function initPage() {
+  await Promise.all([loadIndexAvailableMonths(), loadModeAvailableMonths()]);
+  await loadIndexChart();
+}
+initPage();
 </script>
 
 <template>
@@ -248,75 +224,50 @@ onMounted(async () => {
       </ul>
     </div>
 
+    <!-- 日期选择器 -->
     <section class="content-shell">
       <div class="date-picker-container">
         <el-date-picker
           v-model="currentDate"
           type="month"
           :clearable="false"
-          :disabled="rangeLoading[chartSelected] || !activeRange.start"
           :disabled-date="limitedDateRange"
           @change="handleDateChange"
         />
       </div>
-
-      <div v-if="rangeErrors[chartSelected]" class="state-panel">
-        <el-alert :title="rangeErrors[chartSelected]" type="error" :closable="false" show-icon />
-        <el-button type="primary" plain @click="retryRange">重试日期加载</el-button>
-      </div>
-
-      <div v-if="chartSelected === 0" class="description">
-        {{ chart1Description }}
-      </div>
     </section>
 
-    <section
-      v-if="chartSelected === 0"
-      class="chart-selector"
-      :class="{ 'has-state': Boolean(dataErrors[0]) }"
-      v-loading="dataLoading[0]"
-    >
-      <div v-if="dataErrors[0]" class="state-panel">
-        <el-alert :title="dataErrors[0]" type="error" :closable="false" show-icon />
-        <el-button type="primary" plain @click="loadIndexChart">重新加载</el-button>
+    <!-- 图表展示 -->
+    <div class="chart-wrapper">
+      <!-- 指数预测 -->
+      <div v-if="chartSelected === 0" class="chart-selector">
+        <v-chart class="chart" :option="chart1" autoresize />
       </div>
-      <v-chart v-else-if="hasIndexChart" class="chart" :option="chart1" autoresize />
-      <el-empty v-else-if="!dataLoading[0]" description="暂无指数预测数据" />
-    </section>
 
-    <section
-      v-else
-      class="chart-selector"
-      :class="{ 'has-state': Boolean(dataErrors[1]) }"
-      v-loading="dataLoading[1]"
-    >
-      <div v-if="dataErrors[1]" class="state-panel">
-        <el-alert :title="dataErrors[1]" type="error" :closable="false" show-icon />
-        <el-button type="primary" plain @click="loadModeImages">重新加载</el-button>
-      </div>
-      <div v-else-if="heatImages.length" class="picture-container">
-        <p class="picture-title">{{ currentHeatTitle }}</p>
-        <p class="picture-count">{{ heatIndex + 1 }}/{{ heatImages.length }}</p>
-        <img :src="currentHeatImage" alt="ENSO 模态预测图">
-        <template v-if="heatImages.length > 1">
+      <!-- 模态预测 -->
+      <div v-else class="chart-selector">
+        <div class="pic_container">
+          <p class="picture_title">{{ title_of_heat }}</p>
+          <img v-if="imgSrc_of_heat" style="max-height:90%;" :src="imgSrc_of_heat" alt="">
           <el-button
+            ref="buttonLeft"
             type="primary"
             class="arrow-left"
             :icon="ArrowLeft"
-            aria-label="上一张"
-            @click="changeHeatIndex('left')"
+            :disabled="!imgSrc_of_heat_Array.length"
+            @click="change_time_heat('left')"
           />
           <el-button
+            ref="buttonRight"
             type="primary"
             class="arrow-right"
             :icon="ArrowRight"
-            aria-label="下一张"
-            @click="changeHeatIndex('right')"
+            :disabled="!imgSrc_of_heat_Array.length"
+            @click="change_time_heat('right')"
           />
-        </template>
+        </div>
       </div>
-      <el-empty v-else-if="!dataLoading[1]" description="暂无模态预测图片" />
-    </section>
+    </div>
   </div>
 </template>
 
@@ -331,7 +282,6 @@ onMounted(async () => {
   display: flex;
   align-items: center;
 }
-
 .banner img {
   position: absolute;
   inset: 0;
@@ -340,7 +290,6 @@ onMounted(async () => {
   object-fit: cover;
   object-position: 50% -190px;
 }
-
 .page-title {
   position: relative;
   z-index: 1;
@@ -359,7 +308,6 @@ onMounted(async () => {
   height: 85px;
   margin-top: -50px;
 }
-
 .menu {
   position: relative;
   display: flex;
@@ -371,7 +319,6 @@ onMounted(async () => {
   border-radius: 10px;
   box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
 }
-
 .menu li {
   display: flex;
   width: 250px;
@@ -380,11 +327,9 @@ onMounted(async () => {
   cursor: pointer;
   font-size: 17px;
 }
-
 .chart-name-selected {
   color: rgb(30, 158, 179);
 }
-
 .mov-box {
   position: absolute;
   bottom: 0;
@@ -396,134 +341,139 @@ onMounted(async () => {
 }
 
 .content-shell,
-.chart-selector {
+.chart-wrapper {
   margin: 0 10%;
 }
-
-.date-picker-container {
+.content-shell .date-picker-container {
   display: flex;
   justify-content: flex-end;
-  padding: 50px 0 30px;
+  padding: 50px 0 18px;
 }
 
-.description {
-  padding: 16px;
-  text-align: center;
-  font-size: 17px;
-  background: rgba(239, 242, 252, 0.8);
-  border-radius: 8px;
-  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
 }
 
-.chart-selector {
+.delete-btn {
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.12);
+}
+
+.chart-wrapper {
   min-height: 430px;
   margin-top: 28px;
   margin-bottom: 40px;
 }
-
-.chart-selector.has-state {
-  min-height: 260px;
-}
-
-.chart {
-  height: 50vh;
+.chart-selector {
   min-height: 430px;
-  padding: 20px 0;
   background: white;
   border-radius: 8px;
   box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
-}
-
-.picture-container {
-  position: relative;
   display: flex;
-  width: 100%;
-  min-height: 500px;
-  box-sizing: border-box;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 20px clamp(88px, 12%, 160px);
-  overflow: hidden;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+  padding: 20px;
+}
+.chart {
+  height: 50vh;
+  min-height: 430px;
+  width: 100%;
+  padding: 20px 0;
 }
 
-.picture-container img {
+.pic_container {
+  position: relative;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px 0;
+}
+.picture_title {
+  margin: 0 0 6px;
+  font-size: 18px;
+}
+.pic_container img {
   max-width: 100%;
   max-height: 70vh;
   object-fit: contain;
 }
 
-.picture-title {
-  margin: 0 0 6px;
-  font-size: 18px;
-}
-
-.picture-count {
-  margin: 0 0 12px;
-  color: #606266;
-}
-
 .arrow-left,
 .arrow-right {
   position: absolute;
-  top: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 7%;
+  height: 60%;
+  font-size: 50px;
+  border: none;
+  overflow: hidden;
+  border-radius: 0;
+  color: rgba(128, 128, 128, 0.4);
+  background: transparent;
 }
-
+.arrow-left:hover,
+.arrow-right:hover {
+  color: white;
+  background: transparent;
+}
 .arrow-left {
   left: 0;
 }
-
+.arrow-left:active {
+  transform: perspective(600px) rotateY(15deg) scale(0.95);
+}
+.arrow-left::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: linear-gradient(to left, transparent, rgba(0, 64, 192, 0.3));
+  transition: left 0.3s ease;
+}
+.arrow-left:hover::before {
+  left: 0;
+}
 .arrow-right {
   right: 0;
 }
-
-.state-panel {
-  display: flex;
-  width: min(560px, calc(100% - 48px));
-  margin: 0 auto;
-  padding: 28px;
-  box-sizing: border-box;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 16px;
-  background: rgba(250, 250, 250, 0.82);
-  border: 1px solid #ebeef5;
-  border-radius: 10px;
+.arrow-right:active {
+  transform: perspective(600px) rotateY(-15deg) scale(0.95);
 }
-
-.state-panel :deep(.el-button) {
-  position: static;
-  width: auto;
-  min-width: 112px;
-  height: 38px;
-  align-self: center;
-  padding: 8px 20px;
-  font-size: 14px;
-  border-radius: 6px;
+.arrow-right::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -100%;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: linear-gradient(to right, transparent, rgba(0, 64, 192, 0.3));
+  transition: right 0.3s ease;
+}
+.arrow-right:hover::before {
+  right: 0;
 }
 
 @media (max-width: 760px) {
   .menu li {
     width: 45vw;
   }
-
   .page-title {
     margin-left: 8%;
     font-size: 42px;
   }
-
   .content-shell,
-  .chart-selector {
+  .chart-wrapper {
     margin-right: 4%;
     margin-left: 4%;
-  }
-
-  .picture-container {
-    padding-right: 56px;
-    padding-left: 56px;
   }
 }
 </style>

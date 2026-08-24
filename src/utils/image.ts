@@ -12,17 +12,28 @@ const assetPrefix = trimTrailingSlash(
   || apiAssetFallback
   || window.location.origin,
 )
+const legacyAssetPrefix = trimTrailingSlash(import.meta.env.VITE_LEGACY_ASSET_PREFIX || '')
 
 export function resolveImageUrl(source: unknown): string {
   if (typeof source !== 'string' || source.trim() === '') {
     return ''
   }
 
-  if (/^https?:\/\//i.test(source)) {
-    return source
+  const value = source.trim()
+
+  if (/^https?:\/\//i.test(value)) {
+    return value
   }
 
-  return `${assetPrefix}/${source.replace(/^\/+/, '')}`
+  if (value.startsWith('/admin-files/')) {
+    return `${apiAssetFallback || window.location.origin}/${value.replace(/^\/+/, '')}`
+  }
+
+  if (value.startsWith('/imgs/') && legacyAssetPrefix) {
+    return `${legacyAssetPrefix}/${value.replace(/^\/+/, '')}`
+  }
+
+  return `${assetPrefix}/${value.replace(/^\/+/, '')}`
 }
 
 export function preloadImages(sources: unknown[]): void {

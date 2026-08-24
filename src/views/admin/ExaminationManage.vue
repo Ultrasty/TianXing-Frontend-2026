@@ -333,8 +333,9 @@ onMounted(async () => {
         <p>功能 2.7–2.9：更新、删除和发布评估数据</p>
       </div>
       <div class="header-actions">
-        <el-button type="primary">📊 预报评估数据库</el-button>
+        <el-button @click="router.push('/admin/forecast-data')">📊 预报数据管理</el-button>
         <el-button @click="router.push('/admin/forecast-result-images/publish')">🖼️ 结果图发布</el-button>
+        <el-button type="primary">📊 预报评估数据库</el-button>
         <el-button :icon="Back" @click="router.push({ name: 'home' })">公开站点</el-button>
         <el-button :icon="SwitchButton" @click="logout">退出登录</el-button>
       </div>

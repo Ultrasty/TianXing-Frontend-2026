@@ -1,6 +1,9 @@
 import axios, { AxiosError, AxiosHeaders } from 'axios'
 import { clearAdminSession, getAdminToken } from '@/utils/adminAuth'
 
+// 兼容旧版直接读写 localStorage 的 token key（cp-temp 分支沿用）
+export const ADMIN_TOKEN_KEY = 'tianxing_admin_token'
+
 export type EvaluationCategory = 'ENSO' | 'NAO' | 'SIC' | 'SIE'
 export type ImportMode = 'REJECT' | 'UPSERT'
 
@@ -200,3 +203,65 @@ export async function evaluateWithNsidc(payload: NsidcEvaluationRequest) {
   )
   return response.data.data
 }
+// ==================== 预报数据管理（ForecastData）API ====================
+export interface ForecastDataRecord {
+  id: number
+  year: string
+  month: string
+  var_model: string
+  data?: string | unknown
+  data_preview?: string
+  data_length?: number
+}
+
+export interface ForecastDataPayload {
+  dataset: string
+  year: string
+  month: string
+  varModel: string
+  data: string
+}
+
+export function adminLogout() {
+  return adminHttp.post('/admin/auth/logout')
+}
+
+export function getForecastMeta() {
+  return adminHttp.get('/admin/forecast-data/meta')
+}
+
+export function getForecastData(params: Record<string, unknown>) {
+  return adminHttp.get('/admin/forecast-data', { params })
+}
+
+export function getForecastDataById(dataset: string, id: number) {
+  return adminHttp.get(`/admin/forecast-data/${id}`, { params: { dataset } })
+}
+
+export function createForecastData(payload: ForecastDataPayload) {
+  return adminHttp.post('/admin/forecast-data', payload)
+}
+
+export function updateForecastData(id: number, payload: ForecastDataPayload) {
+  return adminHttp.put(`/admin/forecast-data/${id}`, payload)
+}
+
+export function deleteForecastData(dataset: string, id: number) {
+  return adminHttp.delete(`/admin/forecast-data/${id}`, { params: { dataset } })
+}
+
+export function uploadForecastData(formData: FormData) {
+  return adminHttp.post('/admin/forecast-data/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  })
+}
+
+export function importForecastFromEcmwf(payload: Record<string, unknown>) {
+  return adminHttp.post('/admin/forecast-data/ecmwf', payload)
+}
+
+export function importIndexFromNoaa(payload: Record<string, unknown>) {
+  return adminHttp.post('/admin/forecast-data/noaa-index', payload)
+}
+
+export default adminHttp

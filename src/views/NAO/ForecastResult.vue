@@ -1,240 +1,275 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import axios from 'axios'
-import VChart from 'vue-echarts'
-import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
-import bannerImg from '@/assets/nao.jpg'
-import { preloadImages, resolveImageUrl } from '@/utils/image'
-import { requestErrorMessage } from '@/utils/requestError'
+import { ref, computed, onMounted } from "vue";
+import axios from "axios";
+import VChart from "vue-echarts";
+import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
+import bannerImg from "@/assets/nao.jpg";
 
-const chartNames = ['指数预测', '模态预测']
-const chartSelected = ref(0)
+const prefix = "https://tianxing.tongji.edu.cn";
 
-const selectedDates = ref([null, null])
-const availableMonths = ref([[], []])
-const loading = ref([false, false])
-const errors = ref(['', ''])
-const requestIds = [0, 0]
+// ============================================================
+// Tab
+// ============================================================
 
-const naoiOption = ref({})
-const naoiDescription = ref('')
-const slpImages = ref([])
-const slpImageIndex = ref(0)
+const chartSelected = ref(0);
+const chartNames = ["指数预测", "模态预测"];
 
-const currentDate = computed({
-  get: () => selectedDates.value[chartSelected.value],
-  set: (value) => {
-    selectedDates.value[chartSelected.value] = value
-  },
-})
-const activeAvailableMonths = computed(() => availableMonths.value[chartSelected.value])
-const activeAvailableMonthKeys = computed(() => (
-  new Set(activeAvailableMonths.value.map(monthKey))
-))
-const hasNaoiData = computed(() => Object.keys(naoiOption.value || {}).length > 0)
-const currentSlpImage = computed(() => resolveImageUrl(slpImages.value[slpImageIndex.value]))
-const slpTitle = computed(() => {
-  const date = selectedDates.value[1]
-  if (!date) return '北大西洋 SLP 预测结果'
-  return `${date.getFullYear()}年${date.getMonth() + 1}月 北大西洋SLP预测结果`
-})
+const selectedNAOI = computed(() => chartSelected.value === 0);
+const selectedSLP = computed(() => chartSelected.value === 1);
 
-function createMonth(yearValue, monthValue) {
-  const year = Number(yearValue)
-  const month = Number(monthValue)
-  if (!Number.isInteger(year) || !Number.isInteger(month) || month < 1 || month > 12) {
-    return null
+// ============================================================
+// 两个 Tab 分别保存自己的日期
+// ============================================================
+
+const naoDate = ref(null);
+const slpDate = ref(null);
+
+// 后端真正存在数据的月份
+const naoAvailableMonths = ref(new Set());
+const slpAvailableMonths = ref(new Set());
+
+const NAOISelectedYear = computed(() =>
+  naoDate.value ? naoDate.value.getFullYear() : null
+);
+const NAOISelectedMonth = computed(() =>
+  naoDate.value ? naoDate.value.getMonth() + 1 : null
+);
+const SLPSelectedYear = computed(() =>
+  slpDate.value ? slpDate.value.getFullYear() : null
+);
+const SLPSelectedMonth = computed(() =>
+  slpDate.value ? slpDate.value.getMonth() + 1 : null
+);
+
+// ============================================================
+// 图表与图片状态
+// ============================================================
+
+const NAOIChartTitle = ref("");
+const SLPChartTitle = ref("");
+
+const NAOIOption = ref({});
+const NAOIDescription = ref("");
+
+const NAOILoading = ref(false);
+const SLPLoading = ref(false);
+
+const imgSrc = ref([]);
+const imgIndex = ref(0);
+
+// ============================================================
+// 日期工具
+// ============================================================
+
+function dateToMonthKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${year}-${month}`;
+}
+
+function monthKeyToDate(key) {
+  if (!key) return null;
+  const [year, month] = key.split("-").map(Number);
+  return new Date(year, month - 1, 1);
+}
+
+function getLatestMonth(monthSet) {
+  const months = Array.from(monthSet).sort();
+  if (months.length === 0) return null;
+  return monthKeyToDate(months[months.length - 1]);
+}
+
+// ============================================================
+// 精确月份禁用
+// ============================================================
+
+function NAOIDisabledDate(day) {
+  return !naoAvailableMonths.value.has(dateToMonthKey(day));
+}
+
+function SLPDisabledDate(day) {
+  return !slpAvailableMonths.value.has(dateToMonthKey(day));
+}
+
+// ============================================================
+// NAO 指数预测
+// ============================================================
+
+function updateNAOIChartTitle() {
+  if (!naoDate.value) {
+    NAOIChartTitle.value = "";
+    return;
   }
-  return new Date(year, month - 1, 1)
+  const startYear = NAOISelectedYear.value;
+  const startMonth = NAOISelectedMonth.value;
+  const endDate = new Date(startYear, startMonth - 1 + 5, 1);
+  NAOIChartTitle.value =
+    `${startYear}年${startMonth}月~` +
+    `${endDate.getFullYear()}年${endDate.getMonth() + 1}月 NAO预测结果`;
 }
 
-function monthKey(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
-}
-
-function normalizeAvailableMonths(data) {
-  const candidates = Array.isArray(data?.availableMonths)
-    ? data.availableMonths.map((item) => createMonth(item?.year, item?.month))
-    : [createMonth(data?.end_year, data?.end_month)]
-  const unique = new Map()
-
-  candidates.filter(Boolean).forEach((date) => unique.set(monthKey(date), date))
-  return [...unique.values()].sort((left, right) => left.getTime() - right.getTime())
-}
-
-function limitedDateRange(time) {
-  return !activeAvailableMonthKeys.value.has(monthKey(time))
-}
-
-function setAvailability(index, data) {
-  const normalized = normalizeAvailableMonths(data)
-  if (normalized.length === 0) throw new Error('Empty NAO available month list')
-
-  const end = normalized[normalized.length - 1]
-  availableMonths.value[index] = normalized
-  selectedDates.value[index] = new Date(end)
-}
-
-async function initializeNaoi() {
-  const requestId = ++requestIds[0]
-  loading.value[0] = true
-  errors.value[0] = ''
-  naoiOption.value = {}
-  naoiDescription.value = ''
-
+async function updateNAOIChart() {
+  document.activeElement?.blur();
+  if (!naoDate.value) {
+    NAOIOption.value = {};
+    NAOIDescription.value = "当前没有可用的 NAO 指数预测数据";
+    return;
+  }
+  NAOILoading.value = true;
+  updateNAOIChartTitle();
   try {
-    const response = await axios.get('/nao/initialize/naoPrediction')
-    if (requestId !== requestIds[0]) return
-    setAvailability(0, response.data)
-
-    if (
-      !response.data?.option
-      || typeof response.data.option !== 'object'
-      || Object.keys(response.data.option).length === 0
-    ) {
-      throw new Error('Invalid NAO index initialization data')
-    }
-    naoiOption.value = response.data.option
-    naoiDescription.value = response.data.description || ''
+    const params = {
+      year: NAOISelectedYear.value,
+      month: NAOISelectedMonth.value,
+    };
+    const response = await axios.get("/nao/predictionResult/nao", { params });
+    NAOIOption.value = response.data?.option || {};
+    NAOIDescription.value = response.data?.description || "";
   } catch (error) {
-    if (requestId !== requestIds[0]) return
-    availableMonths.value[0] = []
-    selectedDates.value[0] = null
-    errors.value[0] = requestErrorMessage(error, 'NAO 指数预测初始化失败')
+    console.error("加载 NAO 指数预测失败", error);
+    NAOIOption.value = {};
+    NAOIDescription.value = "NAO 指数预测数据加载失败";
   } finally {
-    if (requestId === requestIds[0]) loading.value[0] = false
+    NAOILoading.value = false;
   }
 }
 
-async function initializeSlp() {
-  const requestId = ++requestIds[1]
-  loading.value[1] = true
-  errors.value[1] = ''
-  slpImages.value = []
-  slpImageIndex.value = 0
+// ============================================================
+// NAO 模态预测
+// ============================================================
 
+function updateSLPChartTitle() {
+  if (!slpDate.value) {
+    SLPChartTitle.value = "";
+    return;
+  }
+  SLPChartTitle.value =
+    `${SLPSelectedYear.value}年${SLPSelectedMonth.value}月 北大西洋SLP预测结果`;
+}
+
+async function updateSLPChart() {
+  document.activeElement?.blur();
+  if (!slpDate.value) {
+    imgSrc.value = [];
+    imgIndex.value = 0;
+    return;
+  }
+  SLPLoading.value = true;
+  updateSLPChartTitle();
   try {
-    const response = await axios.get('/nao/initialize/naoGrid')
-    if (requestId !== requestIds[1]) return
-    setAvailability(1, response.data)
-
-    const images = Array.isArray(response.data?.data)
-      ? response.data.data.filter((item) => typeof item === 'string' && item)
-      : []
-    if (images.length === 0) throw new Error('Empty NAO grid image list')
-    slpImages.value = images
-    preloadImages(images)
+    const params = {
+      year: SLPSelectedYear.value,
+      month: SLPSelectedMonth.value,
+    };
+    const response = await axios.get("/nao/findGridData/nao", { params });
+    imgSrc.value = Array.isArray(response.data) ? response.data : [];
+    imgIndex.value = 0;
+    loadImg(imgSrc.value);
   } catch (error) {
-    if (requestId !== requestIds[1]) return
-    availableMonths.value[1] = []
-    selectedDates.value[1] = null
-    errors.value[1] = requestErrorMessage(error, 'NAO 模态预测初始化失败')
+    console.error("加载 NAO 模态预测失败", error);
+    imgSrc.value = [];
+    imgIndex.value = 0;
   } finally {
-    if (requestId === requestIds[1]) loading.value[1] = false
+    SLPLoading.value = false;
   }
 }
 
-async function updateNaoi() {
-  const date = selectedDates.value[0]
-  if (!date) return
+// ============================================================
+// 初始化可用月份
+// ============================================================
 
-  const requestId = ++requestIds[0]
-  loading.value[0] = true
-  errors.value[0] = ''
-  naoiOption.value = {}
-  naoiDescription.value = ''
-
+async function initNAOIChart() {
   try {
-    const response = await axios.get('/nao/predictionResult/nao', {
-      params: {
-        year: date.getFullYear(),
-        month: date.getMonth() + 1,
-      },
-    })
-    if (requestId !== requestIds[0]) return
-    if (
-      !response.data?.option
-      || typeof response.data.option !== 'object'
-      || Object.keys(response.data.option).length === 0
-    ) {
-      throw new Error('Invalid NAO index response')
-    }
-    naoiOption.value = response.data.option
-    naoiDescription.value = response.data.description || ''
+    const response = await axios.get("/nao/initialize/naoPrediction");
+    const months = response.data?.availableMonths || [];
+    naoAvailableMonths.value = new Set(months);
+    naoDate.value = getLatestMonth(naoAvailableMonths.value);
   } catch (error) {
-    if (requestId !== requestIds[0]) return
-    errors.value[0] = requestErrorMessage(error, 'NAO 指数预测加载失败')
-  } finally {
-    if (requestId === requestIds[0]) loading.value[0] = false
+    console.error("初始化 NAO 指数预测月份失败", error);
+    naoAvailableMonths.value = new Set();
+    naoDate.value = null;
   }
 }
 
-async function updateSlp() {
-  const date = selectedDates.value[1]
-  if (!date) return
-
-  const requestId = ++requestIds[1]
-  loading.value[1] = true
-  errors.value[1] = ''
-  slpImages.value = []
-  slpImageIndex.value = 0
-
+async function initSLPChart() {
   try {
-    const response = await axios.get('/nao/findGridData/nao', {
-      params: {
-        year: date.getFullYear(),
-        month: date.getMonth() + 1,
-      },
-    })
-    if (requestId !== requestIds[1]) return
-    const images = Array.isArray(response.data)
-      ? response.data.filter((item) => typeof item === 'string' && item)
-      : []
-    if (images.length === 0) throw new Error('Empty NAO grid image list')
-    slpImages.value = images
-    preloadImages(images)
+    const response = await axios.get("/nao/initialize/naoGrid");
+    const months = response.data?.availableMonths || [];
+    slpAvailableMonths.value = new Set(months);
+    slpDate.value = getLatestMonth(slpAvailableMonths.value);
   } catch (error) {
-    if (requestId !== requestIds[1]) return
-    errors.value[1] = requestErrorMessage(error, 'NAO 模态预测加载失败')
-  } finally {
-    if (requestId === requestIds[1]) loading.value[1] = false
+    console.error("初始化 NAO 模态预测月份失败", error);
+    slpAvailableMonths.value = new Set();
+    slpDate.value = null;
   }
 }
 
-function handleDateChange() {
-  document.activeElement?.blur()
-  if (!currentDate.value || limitedDateRange(currentDate.value)) return
-  if (chartSelected.value === 0) updateNaoi()
-  else updateSlp()
-}
+// ============================================================
+// 图片左右切换
+// ============================================================
 
-function selectChart(index) {
-  chartSelected.value = index
-}
+const buttonLeft = ref(null);
+const buttonRight = ref(null);
 
-function retryActive() {
-  if (activeAvailableMonths.value.length === 0) {
-    return chartSelected.value === 0 ? initializeNaoi() : initializeSlp()
+const changeIndex = (direction) => {
+  const total = imgSrc.value.length;
+  if (total === 0) return;
+  if (direction === "left") {
+    imgIndex.value = imgIndex.value === 0 ? total - 1 : imgIndex.value - 1;
+    buttonLeft.value?.$el?.blur();
+  } else {
+    imgIndex.value = imgIndex.value === total - 1 ? 0 : imgIndex.value + 1;
+    buttonRight.value?.$el?.blur();
   }
-  return chartSelected.value === 0 ? updateNaoi() : updateSlp()
+};
+
+// ============================================================
+// 图片预加载
+// ============================================================
+
+const loadImg = (imgList) => {
+  for (const path of imgList) {
+    const img = new Image();
+    img.src = `${prefix}${path}`;
+    img.onload = function () {
+      console.log("NAO图片加载完毕", this.currentSrc);
+    };
+    img.onerror = function () {
+      console.log("NAO图片加载失败", this.currentSrc);
+    };
+  }
+};
+
+// ============================================================
+// Tab 切换
+// ============================================================
+
+async function selectChart(index) {
+  chartSelected.value = index;
+  if (index === 0) {
+    await updateNAOIChart();
+  } else {
+    await updateSLPChart();
+  }
 }
 
-function changeImageIndex(direction) {
-  const total = slpImages.value.length
-  if (total < 2) return
-  slpImageIndex.value = direction === 'left'
-    ? (slpImageIndex.value - 1 + total) % total
-    : (slpImageIndex.value + 1) % total
-}
+// ============================================================
+// 移动盒子样式
+// ============================================================
 
 const movBoxStyle = computed(() => ({
   left: `${chartSelected.value * 250}px`,
-}))
+}));
 
-onMounted(() => {
-  initializeNaoi()
-  initializeSlp()
-})
+// ============================================================
+// 页面初始化
+// ============================================================
+
+onMounted(async () => {
+  await Promise.all([initNAOIChart(), initSLPChart()]);
+  // 默认显示指数预测，只加载指数图
+  await updateNAOIChart();
+});
 </script>
 
 <template>
@@ -248,77 +283,167 @@ onMounted(() => {
       <ul class="menu">
         <div :style="movBoxStyle" class="mov-box"></div>
         <li
-          v-for="(chartName, index) in chartNames"
+          v-for="(chartName, index) of chartNames"
           :key="chartName"
-          :class="{ 'chart-name-selected': chartSelected === index }"
           @click="selectChart(index)"
+          :class="{ 'chart-name-selected': chartSelected === index }"
         >
           <p>{{ chartName }}</p>
         </li>
       </ul>
     </div>
 
-    <section class="content-shell">
-      <div class="date-picker-container">
+    <div style="margin: 0px 10%;">
+      <div class="datePickerContainer">
         <el-date-picker
-          v-model="currentDate"
+          v-if="selectedNAOI"
+          v-model="naoDate"
           type="month"
           :clearable="false"
-          :disabled="loading[chartSelected] && activeAvailableMonths.length === 0"
-          :disabled-date="limitedDateRange"
-          @change="handleDateChange"
+          :disabled-date="NAOIDisabledDate"
+          @change="updateNAOIChart"
+        />
+        <el-date-picker
+          v-if="selectedSLP"
+          v-model="slpDate"
+          type="month"
+          :clearable="false"
+          :disabled-date="SLPDisabledDate"
+          @change="updateSLPChart"
         />
       </div>
 
-      <div v-if="chartSelected === 0 && naoiDescription" class="description">
-        {{ naoiDescription }}
+      <div
+        class="text-container"
+        v-if="chartSelected === 0"
+      >
+        <div class="description">
+          {{ NAOIDescription }}
+        </div>
       </div>
-    </section>
+    </div>
 
-    <section
+    <div>
+      <p></p>
+    </div>
+
+    <div
       class="chart-selector"
-      :class="{ 'has-state': Boolean(errors[chartSelected]) }"
-      v-loading="loading[chartSelected]"
+      v-if="chartSelected === 0"
     >
-      <div v-if="errors[chartSelected]" class="state-panel">
-        <el-alert :title="errors[chartSelected]" type="error" :closable="false" show-icon />
-        <el-button type="primary" plain @click="retryActive">重新加载</el-button>
+      <v-chart
+        class="NAOIChart"
+        :option="NAOIOption"
+        autoresize
+      />
+    </div>
+
+    <div
+      class="chart-selector"
+      v-else-if="chartSelected === 1"
+    >
+      <div class="imgContainer">
+        <h3
+          v-show="!SLPLoading"
+          style="position:relative;text-align:center;margin-top:0;margin-bottom:15px;z-index:1;"
+        >
+          {{ SLPChartTitle }}
+        </h3>
+
+        <h4
+          v-if="!SLPLoading && imgSrc.length"
+          style="position:relative;text-align:center;margin-top:0;margin-bottom:15px;font-size:16px;z-index:1;"
+        >
+          ({{ imgIndex + 1 }}/{{ imgSrc.length }})
+        </h4>
+
+        <h4
+          v-else-if="!SLPLoading"
+          style="position:relative;text-align:center;font-size:16px;z-index:1;"
+        >
+          当前月份暂无模态预测图片
+        </h4>
+
+        <img
+          v-if="imgSrc.length"
+          :src="`${prefix}${imgSrc[imgIndex]}`"
+          class="image"
+          alt=""
+        />
       </div>
 
-      <template v-else-if="chartSelected === 0">
-        <v-chart v-if="hasNaoiData" class="chart" :option="naoiOption" autoresize />
-        <el-empty v-else-if="!loading[0]" description="暂无 NAO 指数预测数据" />
-      </template>
-
-      <div v-else-if="slpImages.length" class="picture-container">
-        <h3>{{ slpTitle }}</h3>
-        <p>{{ slpImageIndex + 1 }}/{{ slpImages.length }}</p>
-        <img :src="currentSlpImage" alt="北大西洋 SLP 预测图">
-        <template v-if="slpImages.length > 1">
-          <el-button
-            type="primary"
-            class="arrow-left"
-            :icon="ArrowLeft"
-            aria-label="上一张"
-            @click="changeImageIndex('left')"
-          />
-          <el-button
-            type="primary"
-            class="arrow-right"
-            :icon="ArrowRight"
-            aria-label="下一张"
-            @click="changeImageIndex('right')"
-          />
-        </template>
-      </div>
-      <el-empty v-else-if="chartSelected === 1 && !loading[1]" description="暂无 NAO 模态预测图片" />
-    </section>
+      <el-button
+        ref="buttonLeft"
+        type="primary"
+        class="arrowLeft"
+        :icon="ArrowLeft"
+        :disabled="!imgSrc.length"
+        @click="changeIndex('left')"
+      />
+      <el-button
+        ref="buttonRight"
+        type="primary"
+        class="arrowRight"
+        :icon="ArrowRight"
+        :disabled="!imgSrc.length"
+        @click="changeIndex('right')"
+      />
+    </div>
   </div>
 </template>
 
 <style scoped lang="scss">
-.page-content {
-  min-height: 100%;
+.title {
+  font-family: 'STXinwei';
+  font-weight: 300;
+  text-align: center;
+  font-size: 55px;
+  margin-left: 20%;
+  letter-spacing: 1px;
+  z-index: 1;
+  color: rgb(19, 24, 36);
+}
+
+.NAOIChart {
+  height: 500px;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+.description {
+  text-align: center;
+  font-size: 17px;
+}
+
+.datePickerContainer {
+  display: flex;
+  justify-content: flex-end;
+  position: relative;
+  padding: 50px 0 30px;
+}
+
+.text {
+  margin-left: 5px;
+  margin-right: 10px;
+}
+
+.imgContainer {
+  overflow: hidden;
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
+  padding-top: 20px;
+  padding-bottom: 20px;
+}
+
+.image {
+  width: 100%;
+  margin-top: -7.5%;
+  margin-bottom: -5%;
+  z-index: 0;
 }
 
 .banner {
@@ -335,6 +460,7 @@ onMounted(() => {
   height: 100%;
   object-fit: cover;
   object-position: 50% -155px;
+  z-index: 0;
 }
 
 .page-title {
@@ -351,8 +477,9 @@ onMounted(() => {
   position: relative;
   z-index: 2;
   display: flex;
-  justify-content: center;
   height: 85px;
+  flex-direction: row;
+  justify-content: center;
   margin-top: -50px;
 }
 
@@ -362,23 +489,49 @@ onMounted(() => {
   margin: 0;
   padding: 0;
   overflow: hidden;
-  list-style: none;
-  background: white;
-  border-radius: 10px;
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.4);
 }
 
-.menu li {
+ul.menu::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 55%;
+  background-color: rgba(240, 240, 240, 0.8);
+  z-index: 0;
+  pointer-events: none;
+}
+
+ul.menu li {
+  position: relative;
   display: flex;
   width: 250px;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  overflow: hidden;
   font-size: 17px;
 }
 
-.chart-name-selected {
-  color: rgb(30, 158, 179);
+ul.menu li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 2px;
+  height: 50%;
+  background-color: #00000020;
+  transform: translateY(-50%);
+}
+
+ul.menu li:hover p {
+  color: rgb(71, 72, 76);
+  z-index: 2;
+}
+
+ul.menu li.chart-name-selected:hover p {
+  color: inherit;
 }
 
 .mov-box {
@@ -389,131 +542,167 @@ onMounted(() => {
   transform: translateX(50%);
   background: rgb(143, 178, 201);
   transition: left 0.3s ease;
+  z-index: 3;
 }
 
-.content-shell,
-.chart-selector {
-  margin-right: 10%;
-  margin-left: 10%;
+.chart-name-selected {
+  color: rgb(30, 158, 179);
 }
 
 .date-picker-container {
   display: flex;
   justify-content: flex-end;
-  padding: 50px 0 30px;
+  padding: 50px 0 18px;
 }
 
-.description {
-  padding: 18px;
+.result-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
+.delete-btn {
+  box-shadow: 0 8px 18px rgba(220, 38, 38, 0.12);
+}
+
+.text-container {
+  position: relative;
+  margin: 0px auto;
   text-align: center;
-  font-size: 17px;
-  background: rgba(239, 242, 252, 0.8);
+  background-color: rgba(239, 242, 252, 0.801);
+  padding: 20px;
   border-radius: 8px;
-  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
+  box-shadow: 0px 0px 10px 1.5px rgba(199, 198, 198, 0.893);
 }
 
+/* 保留全局箭头样式，但不再需要额外覆盖，因为按钮已用了 .arrowLeft / .arrowRight 类，
+   且父容器 .chart-selector 设置了 position:relative，箭头可以绝对定位 */
 .chart-selector {
   position: relative;
-  min-height: 500px;
-  margin-top: 28px;
-  margin-bottom: 40px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 0 10px 1.5px rgba(199, 198, 198, 0.9);
-}
-
-.chart-selector.has-state {
-  min-height: 260px;
-}
-
-.chart {
-  height: 500px;
-  padding: 20px 0;
-  box-sizing: content-box;
-}
-
-.picture-container {
-  position: relative;
   display: flex;
-  width: 100%;
-  min-height: 500px;
-  box-sizing: border-box;
   flex-direction: column;
-  align-items: center;
   justify-content: center;
-  padding: 20px clamp(88px, 12%, 160px);
-  overflow: hidden;
+  align-items: center;
+  margin: 0px 10%;
+  padding: 0px 0%;
 }
 
-.picture-container h3,
-.picture-container p {
-  margin: 0 0 10px;
-}
-
-.picture-container img {
-  max-width: 100%;
-  max-height: 70vh;
-  object-fit: contain;
-}
-
-.arrow-left,
-.arrow-right {
+.chart-selector .arrowLeft,
+.chart-selector .arrowRight {
   position: absolute;
   top: 0;
+  width: 7%;
+  height: 100%;
+  font-size: 50px;
+  border: none;
+  overflow: hidden;
+  border-radius: 0;
+  color: rgba(128, 128, 128, 0.4);
+  background: transparent;
 }
 
-.arrow-left {
+.chart-selector .arrowLeft:hover,
+.chart-selector .arrowRight:hover {
+  color: white;
+  background: transparent;
+  border-radius: 0;
+}
+
+.chart-selector .arrowLeft {
   left: 0;
 }
 
-.arrow-right {
+.chart-selector .arrowLeft:active {
+  transform: perspective(600px) rotateY(15deg) scale(0.95);
+}
+
+.chart-selector .arrowLeft::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: linear-gradient(to left, transparent, rgba(0, 64, 192, 0.3));
+  transition: left 0.3s ease;
+}
+
+.chart-selector .arrowLeft:hover::before {
+  left: 0;
+}
+
+.chart-selector .arrowRight {
   right: 0;
 }
 
-.state-panel {
-  display: flex;
-  width: min(560px, calc(100% - 48px));
-  margin: 0 auto;
-  padding: 28px;
-  box-sizing: border-box;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 16px;
-  background: rgba(250, 250, 250, 0.82);
-  border: 1px solid #ebeef5;
-  border-radius: 10px;
+.chart-selector .arrowRight:active {
+  transform: perspective(600px) rotateY(-15deg) scale(0.95);
 }
 
-.state-panel :deep(.el-button) {
-  position: static;
-  width: auto;
-  min-width: 112px;
-  height: 38px;
-  align-self: center;
-  padding: 8px 20px;
+.chart-selector .arrowRight::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: -100%;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+  background: linear-gradient(to right, transparent, rgba(0, 64, 192, 0.3));
+  transition: right 0.3s ease;
+}
+
+.chart-selector .arrowRight:hover::before {
+  right: 0;
+}
+
+/* 日期选择器样式 */
+.datePickerContainer .el-input__wrapper {
+  position: relative;
+  border: none;
+  background: transparent;
+  border-bottom: 2px solid rgb(173, 216, 230);
+  border-radius: 0;
+  box-shadow: none;
+  transition: all ease 0.3s;
+}
+.datePickerContainer .el-input__wrapper .el-input__inner {
   font-size: 14px;
-  border-radius: 6px;
+  height: 100%;
+  margin-left: 0;
+  transition: all 0.3s ease;
+}
+.datePickerContainer .el-input__wrapper::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  width: 0;
+  height: 2px;
+  background: rgb(83, 128, 196);
+  transition: width 0.3s ease;
+}
+.datePickerContainer .el-input__wrapper:hover,
+.datePickerContainer .el-input__wrapper.is-focus {
+  box-shadow: none;
+}
+.datePickerContainer .el-input__wrapper:hover .el-input__inner,
+.datePickerContainer .el-input__wrapper.is-focus .el-input__inner {
+  font-size: 19px;
+  margin-left: 20px;
+}
+.datePickerContainer .el-input__wrapper:hover::after,
+.datePickerContainer .el-input__wrapper.is-focus::after {
+  width: 100%;
 }
 
 @media (max-width: 760px) {
   .menu li {
     width: 45vw;
   }
-
   .page-title {
     margin-left: 8%;
     font-size: 42px;
-  }
-
-  .content-shell,
-  .chart-selector {
-    margin-right: 4%;
-    margin-left: 4%;
-  }
-
-  .picture-container {
-    padding-right: 56px;
-    padding-left: 56px;
   }
 }
 </style>

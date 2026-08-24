@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import type { AxiosProgressEvent } from 'axios'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { adminHttp } from '@/api/admin'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowLeft, ArrowRight, Back, CopyDocument, Delete, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { clearAdminSession } from '@/utils/adminAuth'
+import adminRequest from '@/utils/adminRequest'
+import { preloadImages, resolveImageUrl } from '@/utils/image'
 import bg from '@/assets/bg.png'
 import logoImg from '@/assets/logo-img.png'
 import logoText from '@/assets/logo-txt-b.png'
-import { SwitchButton } from '@element-plus/icons-vue'
 
 interface ImageTypeOption {
   value: string
@@ -27,17 +29,34 @@ interface PublishedResponse {
   verifyPath?: string | null
 }
 
+interface PreviewFile {
+  uid: string
+  name: string
+  size: string
+  url: string
+  revoke: boolean
+}
+
+interface ManageModuleOption {
+  value: 'ENSO' | 'NAO' | 'SEA_ICE'
+  label: string
+  requiresDay: boolean
+}
+
 const fallbackTypeOptions: ImageTypeOption[] = [
   { label: 'ENSO ASC', value: 'ENSO_ASC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
   { label: 'ENSO MC', value: 'ENSO_MC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
   { label: 'ENSO GTC', value: 'ENSO_GTC', period: '月', requiresDay: false, description: 'ENSO 模态预测结果图' },
-  { label: '海冰 SIC', value: 'SIC', period: '日', requiresDay: true, description: '海冰密集度预测结果图' },
-  { label: 'NAO 格点图', value: 'NAO', period: '月', requiresDay: false, description: 'NAO 格点预测结果图' },
-  { label: '全球天气 MSLP', value: 'WEA_MSLP', period: '日', requiresDay: true, description: '海平面气压预测结果图' },
-  { label: '全球天气 T2M', value: 'WEA_T2M', period: '日', requiresDay: true, description: '2 米气温预测结果图' },
-  { label: '全球天气 TP', value: 'WEA_TP', period: '日', requiresDay: true, description: '地表降水预测结果图' },
-  { label: '全球天气 U10', value: 'WEA_U10', period: '日', requiresDay: true, description: '10 米风预测结果图' },
 ]
+const manageModuleOptions: ManageModuleOption[] = [
+  { label: 'ENSO 模态预测', value: 'ENSO', requiresDay: false },
+  { label: 'NAO 模态预测', value: 'NAO', requiresDay: false },
+  { label: '海冰 SIC 模态预测', value: 'SEA_ICE', requiresDay: true },
+]
+
+const allowedImageTypes = ['image/png', 'image/jpeg', 'image/webp', 'image/gif']
+const allowedImagePattern = /\.(png|jpe?g|webp|gif)$/i
+const maxImageSize = 50 * 1024 * 1024
 
 const router = useRouter()
 const loading = ref(false)
@@ -46,39 +65,59 @@ const typeLoadFailed = ref(false)
 const fileList = ref<any[]>([])
 const imageTypeOptions = ref<ImageTypeOption[]>(fallbackTypeOptions)
 const published = ref<PublishedResponse | null>(null)
+const lastError = ref('')
+const progressPercent = ref(0)
+const manualPreviews = ref<PreviewFile[]>([])
+const manageLoading = ref(false)
+const manageDeleting = ref(false)
+const manageError = ref('')
+const managedImages = ref<string[]>([])
+const managedTitles = ref<string[]>([])
+const managedImageIndex = ref(0)
 const currentAdmin = computed(() => localStorage.getItem('tianxing_admin_username') || 'admin')
 
 const form = reactive<{
-  source: 'manual' | 'ecmwf'
   type: string
   year: number
   month: number
   day: number | undefined
-  imageUrls: string
 }>({
-  source: 'manual',
   type: 'ENSO_ASC',
   year: new Date().getFullYear(),
   month: new Date().getMonth() + 1,
   day: undefined,
-  imageUrls: '',
+})
+
+const manageForm = reactive<{
+  module: 'ENSO' | 'NAO' | 'SEA_ICE'
+  year: number
+  month: number
+  day: number | undefined
+}>({
+  module: 'ENSO',
+  year: new Date().getFullYear(),
+  month: new Date().getMonth() + 1,
+  day: undefined,
 })
 
 const selectedType = computed(() => imageTypeOptions.value.find((item) => item.value === form.type))
+const selectedManageModule = computed(() => manageModuleOptions.find((item) => item.value === manageForm.module))
 const requiresDay = computed(() => selectedType.value?.requiresDay || false)
-const selectedFiles = computed(() => fileList.value.map((file) => ({
-  name: file.name,
-  size: formatSize(file.size),
-})))
-const imageUrlCount = computed(() => parseImageUrls(form.imageUrls).length)
+const manageRequiresDay = computed(() => selectedManageModule.value?.requiresDay || false)
 const targetSummary = computed(() => {
   const date = requiresDay.value
     ? `${form.year}年${form.month}月${form.day || '-'}日`
     : `${form.year}年${form.month}月`
   return `${selectedType.value?.label || form.type} / ${date}`
 })
+const progressText = computed(() => {
+  return progressPercent.value >= 100 ? '图片上传完成' : '正在上传图片'
+})
+const currentManagedImage = computed(() => resolveImageUrl(managedImages.value[managedImageIndex.value]))
+const currentManagedTitle = computed(() => managedTitles.value[managedImageIndex.value] || selectedManageModule.value?.label || '当前预报结果图')
 
 onMounted(fetchTypeOptions)
+onBeforeUnmount(releaseManualPreviews)
 
 watch(
   () => form.type,
@@ -94,11 +133,48 @@ watch(
   { immediate: true },
 )
 
+watch(
+  () => manageForm.module,
+  () => {
+    if (!manageRequiresDay.value) {
+      manageForm.day = undefined
+    } else if (!manageForm.day) {
+      manageForm.day = 1
+    }
+    clearManagedImages()
+  },
+  { immediate: true },
+)
+
+watch(
+  () => [manageForm.year, manageForm.month, manageForm.day],
+  clearManagedImages,
+)
+
+watch(
+  fileList,
+  (files) => {
+    releaseManualPreviews()
+    manualPreviews.value = files.map((file) => {
+      const raw = file.raw
+      const url = raw ? URL.createObjectURL(raw) : (file.url || '')
+      return {
+        uid: String(file.uid || file.name),
+        name: file.name,
+        size: formatSize(file.size),
+        url,
+        revoke: Boolean(raw && url),
+      }
+    })
+  },
+  { deep: true },
+)
+
 async function fetchTypeOptions() {
   typeLoading.value = true
   typeLoadFailed.value = false
   try {
-    const response = await adminHttp.get('/admin/forecast-result-images/types')
+    const response = await adminRequest.get('/admin/forecast-result-images/types')
     const payload = response.data?.data || response.data
     if (Array.isArray(payload) && payload.length > 0) {
       imageTypeOptions.value = payload
@@ -110,11 +186,23 @@ async function fetchTypeOptions() {
   }
 }
 
-function parseImageUrls(value: string) {
-  return value
-    .split(/[\n,]/)
-    .map((item) => item.trim())
-    .filter(Boolean)
+function validateSelectedFiles() {
+  const invalid = fileList.value.find((file) => {
+    const type = file.raw?.type
+    return !(allowedImageTypes.includes(type) || allowedImagePattern.test(file.name))
+  })
+  if (invalid) {
+    ElMessage.warning(`仅支持 PNG / JPG / WebP / GIF：${invalid.name}`)
+    return false
+  }
+
+  const oversized = fileList.value.find((file) => file.size > maxImageSize)
+  if (oversized) {
+    ElMessage.warning(`单张图片不能超过 50MB：${oversized.name}`)
+    return false
+  }
+
+  return true
 }
 
 function validateForm() {
@@ -126,12 +214,11 @@ function validateForm() {
     ElMessage.warning('请填写日期')
     return false
   }
-  if (form.source === 'manual' && fileList.value.length === 0) {
+  if (fileList.value.length === 0) {
     ElMessage.warning('请选择图片文件')
     return false
   }
-  if (form.source === 'ecmwf' && imageUrlCount.value === 0) {
-    ElMessage.warning('请填写 ECMWF 图片地址')
+  if (!validateSelectedFiles()) {
     return false
   }
   return true
@@ -143,19 +230,26 @@ async function submitPublish() {
   }
 
   loading.value = true
+  lastError.value = ''
+  progressPercent.value = 0
   published.value = null
   try {
-    const response = form.source === 'manual'
-      ? await publishManual()
-      : await publishFromEcmwf()
+    const response = await publishManual()
     published.value = response.data?.data || response.data
+    progressPercent.value = 100
     ElMessage.success(response.data?.message || '发布成功')
     fileList.value = []
   } catch (error: any) {
-    ElMessage.error(error?.response?.data?.message || error?.response?.data?.error || '发布失败')
+    lastError.value = error?.response?.data?.message || error?.response?.data?.error || '发布失败'
+    progressPercent.value = 0
+    ElMessage.error(lastError.value)
   } finally {
     loading.value = false
   }
+}
+
+function retryPublish() {
+  submitPublish()
 }
 
 function publishManual() {
@@ -171,22 +265,147 @@ function publishManual() {
       data.append('files', file.raw)
     }
   })
-  return adminHttp.post('/admin/forecast-result-images/manual', data)
+  return adminRequest.post('/admin/forecast-result-images/manual', data, {
+    onUploadProgress: updateUploadProgress,
+  })
 }
 
-function publishFromEcmwf() {
-  return adminHttp.post('/admin/forecast-result-images/ecmwf', {
-    year: String(form.year),
-    month: String(form.month),
-    day: requiresDay.value && form.day ? String(form.day) : undefined,
-    type: form.type,
-    imageUrls: parseImageUrls(form.imageUrls),
-  })
+function updateUploadProgress(event: AxiosProgressEvent) {
+  if (!event.total) {
+    progressPercent.value = Math.max(progressPercent.value, 12)
+    return
+  }
+  progressPercent.value = Math.min(95, Math.max(1, Math.round((event.loaded * 100) / event.total)))
+}
+
+function clearManagedImages() {
+  managedImages.value = []
+  managedTitles.value = []
+  managedImageIndex.value = 0
+  manageError.value = ''
+}
+
+function validateManageForm() {
+  if (!manageForm.year || !manageForm.month) {
+    ElMessage.warning('请填写要管理的年份和月份')
+    return false
+  }
+  if (manageRequiresDay.value && !manageForm.day) {
+    ElMessage.warning('请填写海冰 SIC 日期')
+    return false
+  }
+  return true
+}
+
+async function loadManagedImages() {
+  if (!validateManageForm()) return
+
+  manageLoading.value = true
+  manageError.value = ''
+  managedImages.value = []
+  managedTitles.value = []
+  managedImageIndex.value = 0
+
+  try {
+    if (manageForm.module === 'ENSO') {
+      const response = await adminRequest.get('/imgs/predictionResult/ssta', {
+        params: { year: manageForm.year, month: manageForm.month },
+      })
+      managedImages.value = Array.isArray(response.data?.data)
+        ? response.data.data.filter((item: unknown) => typeof item === 'string' && item)
+        : []
+      managedTitles.value = Array.isArray(response.data?.titles) ? response.data.titles : []
+    } else if (manageForm.module === 'NAO') {
+      const response = await adminRequest.get('/nao/findGridData/nao', {
+        params: { year: manageForm.year, month: manageForm.month },
+      })
+      managedImages.value = Array.isArray(response.data)
+        ? response.data.filter((item: unknown) => typeof item === 'string' && item)
+        : []
+      managedTitles.value = managedImages.value.map(() => `${manageForm.year}年${manageForm.month}月 北大西洋SLP预测结果`)
+    } else {
+      const response = await adminRequest.get('/seaice/predictionResult/SIC', {
+        params: { year: manageForm.year, month: manageForm.month, day: manageForm.day },
+      })
+      managedImages.value = Array.isArray(response.data)
+        ? response.data.filter((item: unknown) => typeof item === 'string' && item)
+        : []
+      managedTitles.value = managedImages.value.map(() => `${manageForm.year}年${manageForm.month}月${manageForm.day}日 海冰SIC预测结果`)
+    }
+
+    if (managedImages.value.length > 0) {
+      preloadImages(managedImages.value)
+    }
+  } catch (error: any) {
+    manageError.value = error?.response?.data?.message || error?.response?.data?.error || error?.message || '预报结果图加载失败'
+    ElMessage.error(manageError.value)
+  } finally {
+    manageLoading.value = false
+  }
+}
+
+function currentManageType() {
+  if (manageForm.module === 'NAO') return 'NAO'
+  if (manageForm.module === 'SEA_ICE') return 'SIC'
+
+  const title = currentManagedTitle.value
+  if (title.includes('ENSO_MC')) return 'ENSO_MC'
+  if (title.includes('ENSO_GTC')) return 'ENSO_GTC'
+  return 'ENSO_ASC'
+}
+
+function changeManagedImage(direction: 'left' | 'right') {
+  const total = managedImages.value.length
+  if (total < 2) return
+  managedImageIndex.value = direction === 'left'
+    ? (managedImageIndex.value - 1 + total) % total
+    : (managedImageIndex.value + 1) % total
+}
+
+async function deleteCurrentManagedImage() {
+  const imagePath = managedImages.value[managedImageIndex.value]
+  if (!imagePath || !validateManageForm()) {
+    ElMessage.warning('请先加载并选择要删除的图片')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认删除当前展示的 ${currentManagedTitle.value} 吗？删除后将无法恢复。`,
+      '删除当前预报结果图',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning',
+        draggable: true,
+      },
+    )
+
+    manageDeleting.value = true
+    const response = await adminRequest.post('/admin/forecast-result-images/delete-image', {
+      year: String(manageForm.year),
+      month: String(manageForm.month),
+      day: manageRequiresDay.value && manageForm.day ? String(manageForm.day) : undefined,
+      type: currentManageType(),
+      imagePath,
+    })
+    ElMessage.success(response.data?.message || '当前预报结果图删除成功')
+    const nextIndex = managedImageIndex.value > 0 ? managedImageIndex.value - 1 : 0
+    await loadManagedImages()
+    managedImageIndex.value = Math.min(nextIndex, Math.max(0, managedImages.value.length - 1))
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      const message = error?.response?.data?.message || error?.response?.data?.error || '当前预报结果图删除失败'
+      ElMessage.error(message)
+    }
+  } finally {
+    manageDeleting.value = false
+  }
 }
 
 async function logout() {
   try {
-    await adminHttp.post('/admin/auth/logout')
+    await adminRequest.post('/admin/auth/logout')
   } catch (_error) {
     // Local logout still clears expired or unreachable sessions.
   }
@@ -215,6 +434,15 @@ function formatSize(size?: number) {
   }
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
+
+function releaseManualPreviews() {
+  manualPreviews.value.forEach((file) => {
+    if (file.revoke) {
+      URL.revokeObjectURL(file.url)
+    }
+  })
+  manualPreviews.value = []
+}
 </script>
 
 <template>
@@ -229,11 +457,11 @@ function formatSize(size?: number) {
         <span>后台系统</span>
       </div>
         <div class="admin-actions">
-          <el-button size="small" @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
-          <el-button size="small" type="primary">🖼️ 结果图发布</el-button>
-          <el-button size="small" @click="router.push({ name: 'home' })">🏠 公开站点</el-button>
-          <span>{{ currentAdmin }}</span>
-          <el-button :icon="SwitchButton" text @click="logout">退出</el-button>
+          <el-button @click="router.push('/admin/forecast-data')">📊 预报数据管理</el-button>
+          <el-button type="primary">🖼️ 结果图发布</el-button>
+          <el-button @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
+          <el-button :icon="Back" @click="router.push({ name: 'home' })">公开站点</el-button>
+          <el-button :icon="SwitchButton" @click="logout">退出登录</el-button>
         </div>
     </header>
 
@@ -244,7 +472,7 @@ function formatSize(size?: number) {
       </div>
       <div class="hero-facts">
         <div>
-          <strong>{{ form.source === 'manual' ? '手动上传' : 'ECMWF 拉取' }}</strong>
+          <strong>手动上传</strong>
           <span>来源</span>
         </div>
         <div>
@@ -252,7 +480,7 @@ function formatSize(size?: number) {
           <span>粒度</span>
         </div>
         <div>
-          <strong>{{ form.source === 'manual' ? fileList.length : imageUrlCount }}</strong>
+          <strong>{{ fileList.length }}</strong>
           <span>图片</span>
         </div>
       </div>
@@ -264,7 +492,7 @@ function formatSize(size?: number) {
           <span>1</span>
           <div>
             <strong>来源</strong>
-            <p>{{ form.source === 'manual' ? '本地图片' : '远程图片' }}</p>
+            <p>本地图片</p>
           </div>
         </div>
         <div class="flow-item is-active">
@@ -274,11 +502,11 @@ function formatSize(size?: number) {
             <p>{{ targetSummary }}</p>
           </div>
         </div>
-        <div class="flow-item" :class="{ 'is-active': form.source === 'manual' ? fileList.length > 0 : imageUrlCount > 0 }">
+        <div class="flow-item" :class="{ 'is-active': fileList.length > 0 }">
           <span>3</span>
           <div>
             <strong>发布内容</strong>
-            <p>{{ form.source === 'manual' ? `${fileList.length} 个文件` : `${imageUrlCount} 个地址` }}</p>
+            <p>{{ `${fileList.length} 个文件` }}</p>
           </div>
         </div>
         <button class="refresh-types" type="button" @click="fetchTypeOptions">
@@ -291,13 +519,6 @@ function formatSize(size?: number) {
       <section class="publish-panel">
         <el-form label-position="top">
           <div class="form-grid">
-            <el-form-item label="来源">
-              <el-radio-group v-model="form.source">
-                <el-radio-button label="manual">手动上传</el-radio-button>
-                <el-radio-button label="ecmwf">ECMWF 拉取</el-radio-button>
-              </el-radio-group>
-            </el-form-item>
-
             <el-form-item label="图片类型">
               <el-select v-model="form.type" filterable>
                 <el-option
@@ -322,12 +543,13 @@ function formatSize(size?: number) {
             </el-form-item>
           </div>
 
-          <el-form-item v-if="form.source === 'manual'" label="图片文件">
+          <el-form-item label="图片文件">
             <el-upload
               v-model:file-list="fileList"
               class="admin-upload"
               accept="image/png,image/jpeg,image/webp,image/gif"
               :auto-upload="false"
+              :show-file-list="false"
               drag
               multiple
             >
@@ -339,32 +561,102 @@ function formatSize(size?: number) {
             </el-upload>
           </el-form-item>
 
-          <el-form-item v-else label="ECMWF 图片地址">
-            <el-input
-              v-model="form.imageUrls"
-              type="textarea"
-              :rows="8"
-              placeholder="https://charts.ecmwf.int/..."
-            />
-          </el-form-item>
+          <div v-if="manualPreviews.length" class="preview-grid">
+            <article v-for="file in manualPreviews" :key="file.uid" class="preview-card">
+              <img :src="file.url" :alt="file.name" />
+              <div class="preview-meta">
+                <strong>{{ file.name }}</strong>
+                <small>{{ file.size }}</small>
+              </div>
+            </article>
+          </div>
 
-          <div v-if="selectedFiles.length" class="file-list">
-            <div v-for="file in selectedFiles" :key="file.name" class="file-row">
-              <Check />
-              <span>{{ file.name }}</span>
-              <small>{{ file.size }}</small>
+          <div v-if="loading || progressPercent > 0" class="publish-progress">
+            <el-progress
+              :percentage="progressPercent"
+              :status="progressPercent >= 100 ? 'success' : undefined"
+            />
+            <span>{{ progressText }}</span>
+          </div>
+
+          <div v-if="lastError" class="error-panel">
+            <WarningFilled />
+            <div>
+              <strong>发布失败</strong>
+              <p>{{ lastError }}</p>
             </div>
+            <el-button text type="primary" :icon="Refresh" :disabled="loading" @click="retryPublish">重试</el-button>
           </div>
 
           <div class="actions">
             <div>
               <strong>{{ targetSummary }}</strong>
-              <span>{{ form.source === 'manual' ? `${fileList.length} 个文件` : `${imageUrlCount} 个地址` }}</span>
+              <span>{{ `${fileList.length} 个文件` }}</span>
             </div>
             <el-button type="primary" :loading="loading" @click="submitPublish">发布</el-button>
           </div>
         </el-form>
       </section>
+    </section>
+
+    <section class="manage-panel">
+      <header>
+        <div>
+          <strong>模态预测图管理</strong>
+          <span>仅管理员可删除当前展示的模态预测图片</span>
+        </div>
+        <el-button type="primary" plain :loading="manageLoading" @click="loadManagedImages">加载图片</el-button>
+      </header>
+
+      <div class="manage-form-grid">
+        <el-form-item label="模块">
+          <el-select v-model="manageForm.module">
+            <el-option
+              v-for="item in manageModuleOptions"
+              :key="item.value"
+              :label="item.label"
+              :value="item.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="年份">
+          <el-input-number v-model="manageForm.year" :min="1900" :max="2200" controls-position="right" />
+        </el-form-item>
+        <el-form-item label="月份">
+          <el-input-number v-model="manageForm.month" :min="1" :max="12" controls-position="right" />
+        </el-form-item>
+        <el-form-item v-if="manageRequiresDay" label="日期">
+          <el-input-number v-model="manageForm.day" :min="1" :max="31" controls-position="right" />
+        </el-form-item>
+      </div>
+
+      <div v-if="manageError" class="error-panel manage-error">
+        <WarningFilled />
+        <div>
+          <strong>加载失败</strong>
+          <p>{{ manageError }}</p>
+        </div>
+        <el-button text type="primary" :icon="Refresh" :disabled="manageLoading" @click="loadManagedImages">重试</el-button>
+      </div>
+
+      <div v-if="managedImages.length" class="managed-preview">
+        <div class="managed-image-box">
+          <img :src="currentManagedImage" :alt="currentManagedTitle" />
+          <template v-if="managedImages.length > 1">
+            <el-button class="managed-arrow left" type="primary" :icon="ArrowLeft" aria-label="上一张" @click="changeManagedImage('left')" />
+            <el-button class="managed-arrow right" type="primary" :icon="ArrowRight" aria-label="下一张" @click="changeManagedImage('right')" />
+          </template>
+        </div>
+        <div class="managed-meta">
+          <strong>{{ currentManagedTitle }}</strong>
+          <span>{{ managedImageIndex + 1 }}/{{ managedImages.length }}</span>
+          <code>{{ managedImages[managedImageIndex] }}</code>
+          <el-button type="danger" :icon="Delete" :loading="manageDeleting" @click="deleteCurrentManagedImage">
+            删除当前展示图片
+          </el-button>
+        </div>
+      </div>
+      <el-empty v-else-if="!manageLoading && !manageError" description="请选择模块和时间后加载模态预测图片" />
     </section>
 
     <section v-if="published" class="result-panel">
@@ -648,6 +940,91 @@ function formatSize(size?: number) {
 
 .file-row small {
   color: #667085;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 4px 0 18px;
+}
+
+.preview-card {
+  overflow: hidden;
+  border: 1px solid #d7e6f1;
+  border-radius: 8px;
+  background: #f8fbfd;
+  box-shadow: 0 8px 20px rgba(19, 50, 76, 0.08);
+}
+
+.preview-card img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  background: #dfeaf3;
+}
+
+.preview-meta {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px 12px;
+}
+
+.preview-meta strong,
+.preview-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-meta small {
+  color: #667085;
+}
+
+.publish-progress {
+  display: grid;
+  gap: 8px;
+  margin: 2px 0 18px;
+  padding: 12px 14px;
+  border: 1px solid #dbe7f1;
+  border-radius: 8px;
+  background: #f7fbfe;
+}
+
+.publish-progress span {
+  color: #667085;
+  font-size: 13px;
+}
+
+.error-panel {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #f3c1c7;
+  border-radius: 8px;
+  background: #fff5f6;
+  color: #9f1d2d;
+}
+
+.error-panel svg {
+  margin-top: 2px;
+  width: 16px;
+  height: 16px;
+}
+
+.error-panel strong,
+.error-panel p {
+  margin: 0;
+}
+
+.error-panel p {
+  margin-top: 4px;
+  color: #aa3141;
+  word-break: break-all;
 }
 
 .actions {

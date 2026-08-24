@@ -2,9 +2,10 @@
 import { RouterView } from 'vue-router'
 import axios from 'axios'
 
+// 优先使用环境变量配置的 API 前缀，其次按环境自动回退
 const apiBaseUrl = import.meta.env.VITE_API_PREFIX
   || import.meta.env.VITE_API_BASE_URL
-  || (import.meta.env.DEV ? 'http://localhost:8888' : 'https://tianxing.tongji.edu.cn/api/')
+  || (import.meta.env.DEV ? '/api' : 'https://tianxing.tongji.edu.cn/api/')
 
 axios.defaults.baseURL = apiBaseUrl
 </script>
