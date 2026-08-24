@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { AxiosProgressEvent } from 'axios'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, ArrowRight, CopyDocument, Delete, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
+import { ArrowLeft, ArrowRight, Back, CopyDocument, Delete, Link, Refresh, SwitchButton, UploadFilled, WarningFilled } from '@element-plus/icons-vue'
 import { clearAdminSession } from '@/utils/adminAuth'
 import adminRequest from '@/utils/adminRequest'
 import { preloadImages, resolveImageUrl } from '@/utils/image'
@@ -457,12 +457,11 @@ function releaseManualPreviews() {
         <span>后台系统</span>
       </div>
         <div class="admin-actions">
-          <el-button size="small" @click="router.push('/admin/forecast-data')">📊 预报数据管理</el-button>
-          <el-button size="small" @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
-          <el-button size="small" type="primary">🖼️ 结果图发布</el-button>
-          <el-button size="small" @click="router.push({ name: 'home' })">🏠 公开站点</el-button>
-          <span>{{ currentAdmin }}</span>
-          <el-button :icon="SwitchButton" text @click="logout">退出</el-button>
+          <el-button @click="router.push('/admin/forecast-data')">📊 预报数据管理</el-button>
+          <el-button type="primary">🖼️ 结果图发布</el-button>
+          <el-button @click="router.push('/admin/evaluations')">📊 评估数据库</el-button>
+          <el-button :icon="Back" @click="router.push({ name: 'home' })">公开站点</el-button>
+          <el-button :icon="SwitchButton" @click="logout">退出登录</el-button>
         </div>
     </header>
 
