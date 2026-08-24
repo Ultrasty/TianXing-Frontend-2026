@@ -4,8 +4,7 @@ import axios from "axios";
 import VChart from "vue-echarts";
 import { ArrowLeft, ArrowRight } from "@element-plus/icons-vue";
 import bannerImg from "@/assets/nao.jpg";
-
-const prefix = "https://tianxing.tongji.edu.cn";
+import { preloadImages, resolveImageUrl, useOnlineImageFallback } from "@/utils/image";
 
 // ============================================================
 // Tab
@@ -56,6 +55,7 @@ const SLPLoading = ref(false);
 
 const imgSrc = ref([]);
 const imgIndex = ref(0);
+const currentModalImage = computed(() => resolveImageUrl(imgSrc.value[imgIndex.value]));
 
 // ============================================================
 // 日期工具
@@ -228,16 +228,7 @@ const changeIndex = (direction) => {
 // ============================================================
 
 const loadImg = (imgList) => {
-  for (const path of imgList) {
-    const img = new Image();
-    img.src = `${prefix}${path}`;
-    img.onload = function () {
-      console.log("NAO图片加载完毕", this.currentSrc);
-    };
-    img.onerror = function () {
-      console.log("NAO图片加载失败", this.currentSrc);
-    };
-  }
+  preloadImages(imgList);
 };
 
 // ============================================================
@@ -366,9 +357,10 @@ onMounted(async () => {
 
         <img
           v-if="imgSrc.length"
-          :src="`${prefix}${imgSrc[imgIndex]}`"
+          :src="currentModalImage"
           class="image"
           alt=""
+          @error="useOnlineImageFallback"
         />
       </div>
 

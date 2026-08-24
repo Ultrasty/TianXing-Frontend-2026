@@ -4,7 +4,7 @@ import axios from 'axios'
 import VChart from 'vue-echarts'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import bannerImg from '@/assets/Ice.jpg'
-import { preloadImages, resolveImageUrl } from '@/utils/image'
+import { preloadImages, resolveImageUrl, useOnlineImageFallback } from '@/utils/image'
 import { requestErrorMessage } from '@/utils/requestError'
 
 const chartNames = ['SIE指数', 'SIC模态']
@@ -408,7 +408,7 @@ onMounted(async () => {
       <div v-else-if="sicImages.length" class="picture-container">
         <h3>{{ sicTitle }}</h3>
         <p>{{ sicImageIndex + 1 }}/{{ sicImages.length }}</p>
-        <img :src="currentSicImage" alt="海冰 SIC 预测图">
+        <img :src="currentSicImage" alt="海冰 SIC 预测图" @error="useOnlineImageFallback">
         <template v-if="sicImages.length > 1">
           <el-button
             type="primary"
